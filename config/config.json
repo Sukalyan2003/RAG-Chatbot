@@ -1,0 +1,126 @@
+{
+    "llm": {
+        "provider": "ollama",
+        "base_url": "http://localhost:11434",
+        "model": "qwen3:4b-instruct",
+        "api_key": "ollama",
+        "temperature": 0.7,
+        "max_tokens": 2000,
+        "context_window": 8192,
+        "timeout": 120
+    },
+    "embedding": {
+        "provider": "ollama",
+        "base_url": "http://localhost:11434",
+        "model": "qwen3-embedding:0.6b",
+        "batch_size": 32,
+        "max_length": 512,
+        "device": "cpu",
+        "timeout": 120
+    },
+    "retrieval": {
+        "similarity_threshold": 0.3,
+        "max_results": 5,
+        "chunk_size": 1000,
+        "chunk_overlap": 200,
+        "rerank_results": true
+    },
+    "system": {
+        "log_level": "INFO",
+        "max_conversation_history": 10,
+        "enable_source_attribution": true,
+        "enable_streaming": false,
+        "cache_embeddings": true,
+        "conversation_timeout": 1800
+    },
+    "mcp": {
+        "enabled": true,
+        "server_timeout": 30,
+        "protocol_version": "2024-11-05",
+        "stdio_buffer_size": 8192,
+        "http_port": 8080,
+        "http_host": "localhost",
+        "enable_http_transport": false,
+        "enable_websocket_transport": false
+    },
+    "roles": {
+        "Admin": {
+            "permissions": [
+                "financial_data",
+                "all_documents",
+                "system_config",
+                "mcp_admin"
+            ],
+            "response_length": "detailed",
+            "access_level": "full",
+            "mcp_tools": [
+                "chat",
+                "load_documents",
+                "get_stats",
+                "clear_conversation",
+                "clear_documents",
+                "analyze_query",
+                "search_documents"
+            ]
+        },
+        "User": {
+            "permissions": [
+                "general_documents",
+                "public_data"
+            ],
+            "response_length": "concise",
+            "access_level": "limited",
+            "mcp_tools": [
+                "chat",
+                "get_stats",
+                "analyze_query",
+                "search_documents"
+            ]
+        },
+        "Expert": {
+            "permissions": [
+                "general_documents",
+                "public_data",
+                "technical_documents"
+            ],
+            "response_length": "detailed",
+            "access_level": "advanced",
+            "mcp_tools": [
+                "chat",
+                "get_stats",
+                "analyze_query",
+                "search_documents"
+            ]
+        },
+        "Guest": {
+            "permissions": [
+                "public_data"
+            ],
+            "response_length": "brief",
+            "access_level": "minimal",
+            "mcp_tools": [
+                "chat",
+                "search_documents"
+            ]
+        }
+    },
+    "paths": {
+        "data_dir": "data",
+        "documents_dir": "data/documents",
+        "embeddings_dir": "data/embeddings",
+        "logs_dir": "data/logs",
+        "cache_dir": "data/cache"
+    },
+    "security": {
+        "enable_input_validation": true,
+        "max_query_length": 1000,
+        "rate_limit": 100,
+        "audit_logging": true
+    },
+    "performance": {
+        "enable_async": true,
+        "worker_threads": 4,
+        "batch_processing": true,
+        "memory_limit_mb": 2048
+    }
+}

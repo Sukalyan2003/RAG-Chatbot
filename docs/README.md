@@ -1,0 +1,191 @@
+# Final RAG Chatbot (MCP-Enabled)
+
+A Retrieval-Augmented Generation (RAG) chatbot that runs locally against an Ollama backend, exposes its full surface area through the Model Context Protocol (MCP), and ships with a Streamlit web UI, a CLI, and a small set of runnable examples.
+
+## Highlights
+
+- **Local-first**: Ollama is the default LLM and embedding provider (`http://localhost:11434`). A chat-completion compatible API is supported as an optional fallback.
+- **MCP server + client**: JSON-RPC 2.0 over stdio, with tools for chat, document loading, search, query analysis, stats, and cache management.
+- **Multi-format ingestion**: PDF (pdfminer.six), DOCX (python-docx, optional), TXT, Markdown, JSON, CSV, and web URLs (requests + BeautifulSoup).
+- **Role-aware behavior**: Admin / Expert / User / Guest roles control response length, MCP tool access, and permission gating.
+- **Persistent embeddings cache**: pickled cache under `data/embeddings/embeddings_cache.pkl`; duplicate chunks are detected on reload.
+- **Two Streamlit UIs**: a direct-import app (`streamlit_app.py`) and an MCP-backed app (`streamlit_app_mcp.py`).
+
+## Repository Layout
+
+```
+.
+├── config/config.json              Runtime configuration (LLM, embeddings, retrieval, roles, MCP, security)
+├── data/                           Documents, embeddings cache, exports, logs (gitignored)
+├── docs/                           User-facing documentation
+├── health_check.py                 End-to-end health diagnostic
+├── launch_mcp_server.py            Cross-platform MCP server launcher
+├── main.py                         Trivial entrypoint
+├── mcp-requirements.txt            Optional MCP/HTTP transport dependencies
+├── requirements.txt                Core Python dependencies
+├── scripts/                        Setup and launch helpers
+├── src/
+│   ├── core/                       RAG engine (orchestrator, doc processor, embeddings, LLM, query analysis, conversation)
+│   ├── mcp/                        MCP protocol handler, stdio server, async client, integration wrapper
+│   ├── ui/                         Streamlit apps (direct + MCP)
+│   └── examples/                   Runnable examples
+├── start_mcp.ps1                   Windows/PowerShell launcher
+└── tests/test_system.py            Focused unit/integration tests with fake numeric + Ollama backends
+```
+
+## Core Modules
+
+### `src/core/final_rag_system.py`
+`FinalRAGChatbot` is the orchestrator. It loads `config/config.json`, instantiates the document processor, embedding manager, LLM interface, query analyzer, and conversation manager, then exposes:
+
+- `load_documents(source, document_type="auto")` — file, directory, or URL; deduplicates against the existing index by `(source, file_name, type, chunk markers, content)`.
+- `chat(query, stream=None)` — full RAG pipeline: validate input → permission check → analyze → retrieve → generate → record interaction → update stats.
+- `chat_async(query)` — runs `chat` in a thread executor when `performance.enable_async` is on.
+- `get_stats()`, `clear_conversation()`, `export_conversation(format)`, `reset_system()`, `clear_documents(delete_cache=True)`, `get_document_summaries()`.
+- Source attribution is appended as a Markdown `**Sources**` block; the previous block is stripped before the model sees the next turn.
+- WSL-friendly path normalization: `C:\Users\…\file.pdf` pasted into the UI is rewritten to `/mnt/c/Users/…/file.pdf`.
+
+### `src/core/document_processor.py`
+`DocumentProcessor` handles file types via a dispatch dict. Text is split on sentence boundaries with configurable chunk size and overlap; long sentences fall back to word-level splitting. JSON inputs prefer well-known content fields (`content`, `text`, `body`, `message`, `description`, `summary`). Web URLs are fetched with a fixed User-Agent, stripped of `<script>`/`<style>`, and chunked the same way.
+
+### `src/core/embedding_manager.py`
+`EmbeddingManager` supports two embedding providers:
+
+- `ollama` (default) — POSTs to `/api/embed` (batch) and falls back to `/api/embeddings` (legacy single-prompt) for older Ollama builds.
+- `sentence_transformers` — local fallback if you prefer not to run an embedding server.
+
+Similarity uses cosine similarity from scikit-learn over a stacked NumPy matrix. The manager exposes add / retrieve / update / remove / search-by-metadata, plus pickle import/export and an optional re-ranker that biases by content length and document type.
+
+### `src/core/llm_interface.py`
+`LLMInterface` supports `ollama` (POST `/api/chat`) and `local` / chat-completion compatible providers via the optional `openai` Python package. It also exposes helpers used by the broader system: `check_relevance`, `summarize_text`, `extract_keywords`, `classify_query`, `generate_questions`, `evaluate_answer`, and `is_available` health probe.
+
+### `src/core/query_analyzer.py`
+Lightweight, regex-driven analysis: intent classification (`question`, `tutorial`, `definition`, `comparison`, `troubleshooting`, `command`, `request`), entity extraction, query type, query enhancement, synonym expansion, simple filter extraction, and safety/length validation.
+
+### `src/core/conversation_manager.py`
+Role-keyed history with configurable maximum length and session timeout. Provides `add_interaction`, `get_context`, `get_full_history`, `clear_history`, summaries, topic extraction, similar-query lookup, and export as JSON / TXT / CSV.
+
+### `src/core/utils.py`
+Logging (with optional Rich), input validation against a denylist of script/SQL/code-execution patterns, output sanitization (HTML stripping, whitespace normalization, length cap), file hashing, system info, and a `PerformanceMonitor`.
+
+## MCP Layer
+
+### `src/mcp/mcp_server.py`
+`MCPProtocolHandler` implements the JSON-RPC 2.0 surface (initialize, `tools/list`, `tools/call`, `resources/list`, `resources/read`, `prompts/list`, `prompts/get`). `MCPStdioServer` reads requests from stdin and writes responses to stdout, with logs routed to stderr so they don't corrupt the protocol stream.
+
+Tools (7):
+
+| Tool | Purpose |
+|------|---------|
+| `chat` | Run a full RAG turn for the given role. |
+| `load_documents` | Ingest a file, directory, or URL. |
+| `search_documents` | Top-K semantic retrieval with a similarity threshold. |
+| `analyze_query` | Return the analyzed/enhanced query. |
+| `get_stats` | Performance counters, uptime, document/chunk counts, last error. |
+| `clear_conversation` | Drop role-scoped chat history. |
+| `clear_documents` | Drop loaded documents/embeddings and (optionally) delete the persisted cache file. |
+
+Resources:
+
+- `rag://conversations/{admin|expert|user|guest}` — role-scoped history.
+- `rag://config` — current `config/config.json`.
+- `rag://documents/list` — summarized document index (one row per source).
+
+Prompts:
+
+- `system_prompt` — returns the role-conditioned system prompt the chatbot uses internally.
+
+### `src/mcp/client.py`
+- `MCPClient` — async subprocess client that speaks stdio JSON-RPC, tolerates accidental non-JSON lines on stdout, and exposes typed helpers for each tool/resource/prompt.
+- `MCPIntegratedRAG` — same surface as `FinalRAGChatbot` but async; usable as an `async with` context manager.
+- `FinalRAGChatbotMCP` — drop-in subclass of `MCPIntegratedRAG` matching the original constructor signature.
+
+## Configuration
+
+`config/config.json` drives everything. Key sections:
+
+- `llm` — provider (`ollama` default), `base_url`, `model` (`qwen3:4b-instruct` by default), temperature, token/context limits, timeout.
+- `embedding` — provider (`ollama` default), `model` (`qwen3-embedding:0.6b` by default), batch size, max length, device, timeout.
+- `retrieval` — `similarity_threshold` (0.3), `max_results` (5), `chunk_size` (1000), `chunk_overlap` (200), `rerank_results`.
+- `system` — log level, conversation history cap, source attribution, streaming, cache flag, session timeout.
+- `mcp` — `enabled`, server timeout, protocol version (`2024-11-05`), stdio buffer size, optional HTTP/WebSocket transport flags.
+- `roles` — per-role permissions, response length, access level, allowed MCP tools.
+- `paths` — `data_dir`, `documents_dir`, `embeddings_dir`, `logs_dir`, `cache_dir`.
+- `security` — input validation toggle, max query length, rate limit, audit logging flag.
+- `performance` — async toggle, worker threads, batch processing, memory cap.
+
+## Install & Run
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate            # On Windows: .venv\Scripts\activate
+pip install -r requirements.txt
+pip install -r mcp-requirements.txt  # optional: HTTP/WebSocket MCP transport
+
+python health_check.py               # diagnose deps, config, Ollama service, modules
+```
+
+Make sure Ollama is running locally and the configured models are pulled:
+
+```bash
+ollama serve
+ollama pull qwen3:4b-instruct
+ollama pull qwen3-embedding:0.6b
+```
+
+Then choose one of:
+
+```bash
+# MCP-backed Streamlit UI
+streamlit run src/ui/streamlit_app_mcp.py
+
+# Direct-import Streamlit UI
+streamlit run src/ui/streamlit_app.py
+
+# Interactive CLI
+python -m src.core.final_rag_system --interactive --role User
+
+# MCP server alone (stdio)
+python launch_mcp_server.py --config config/config.json
+```
+
+On Windows, `start_mcp.ps1` wraps the server + Streamlit combo (`-ServerOnly` / `-StreamlitOnly` switches available).
+
+## Programmatic Usage
+
+```python
+from src.core.final_rag_system import FinalRAGChatbot
+
+with FinalRAGChatbot(role="User") as bot:
+    bot.load_documents("data/documents/")
+    print(bot.chat("What is machine learning?"))
+    print(bot.get_stats())
+```
+
+```python
+import asyncio
+from src.mcp.client import MCPIntegratedRAG
+
+async def main():
+    async with MCPIntegratedRAG(role="User") as rag:
+        print(await rag.chat("Summarize the loaded docs"))
+        print(await rag.get_stats())
+
+asyncio.run(main())
+```
+
+## Testing
+
+```bash
+python -m unittest tests.test_system
+```
+
+The test suite installs lightweight stand-ins for NumPy / scikit-learn and fakes the Ollama HTTP surface, so it runs without a live model. It covers config shape, input validation, the document processor across text/JSON/CSV, the MCP initialize + `tools/list` handshake, end-to-end load → chat with deduplication, and the `clear_documents` cache cleanup path.
+
+## Further Reading
+
+- [QUICKSTART.md](QUICKSTART.md) — fastest path to a working chatbot.
+- [MCP_QUICKSTART.md](MCP_QUICKSTART.md) — MCP-specific setup and integration.
+- [MCP_CONVERSION_SUMMARY.md](MCP_CONVERSION_SUMMARY.md) — what the MCP layer adds and how to wire it into any MCP-compatible client.
+- [STREAMLIT_GUIDE.md](STREAMLIT_GUIDE.md) — the web UIs in detail.
+- [INTERVIEW.md](INTERVIEW.md) — exhaustive Q&A covering everything an interviewer might ask about this project.

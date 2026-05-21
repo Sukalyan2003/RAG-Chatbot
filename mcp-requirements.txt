@@ -1,0 +1,14 @@
+# MCP Server Dependencies for Final RAG Chatbot
+# Install with: pip install -r mcp-requirements.txt
+
+# Core MCP libraries
+mcp              # Model Context Protocol implementation
+fastapi           # For HTTP transport
+uvicorn          # ASGI server
+pydantic         # Data validation (already in main requirements)
+websockets       # WebSocket support for MCP
+httpx           # HTTP client
+
+# Additional async support
+anyio           # Async framework
+trio            # Alternative async framework

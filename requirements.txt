@@ -1,0 +1,39 @@
+# Final RAG Chatbot Dependencies
+# Install with: pip install -r requirements.txt
+
+# Core ML and NLP libraries
+scikit-learn
+numpy
+pandas
+
+# Ollama integration
+requests      # HTTP requests
+
+# Document processing
+beautifulsoup4  # Web scraping
+pdfminer.six  # PDF processing
+python-dotenv  # Environment variables
+
+# Web interface
+streamlit       # Main web framework
+plotly          # Interactive charts
+altair         # Additional plotting
+
+# Utility libraries
+typing-extensions
+loguru        # Enhanced logging
+pydantic       # Data validation
+tqdm           # Progress bars
+colorama      # Colored terminal output
+rich          # Rich text formatting
+click         # CLI interface
+cryptography  # Security utilities
+
+# Additional packages for enhanced functionality
+psutil       # System monitoring
+python-multipart
+
+# Optional providers:
+# - sentence-transformers  # local embedding fallback
+# - openai                 # chat-completion compatible LLM fallback
+# - mcp-requirements.txt   # optional MCP/HTTP transport packages
