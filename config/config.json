@@ -31,6 +31,7 @@
         "enable_source_attribution": true,
         "enable_streaming": false,
         "cache_embeddings": true,
+        "cache_schema_version": 1,
         "conversation_timeout": 1800
     },
     "mcp": {

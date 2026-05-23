@@ -20,7 +20,20 @@ import os
 import logging
 import asyncio
 import re
-from typing import Dict, List, Optional, Any, Union
+from typing import Callable, Dict, List, Optional, Any, Union
+
+# (stage, current, total) progress callback signature shared across the engine.
+ProgressCallback = Callable[[str, Optional[int], Optional[int]], None]
+
+
+def _safe_report(callback: Optional[ProgressCallback], stage: str, current: Optional[int] = None, total: Optional[int] = None) -> None:
+    """Invoke a progress callback while ignoring callback-side exceptions."""
+    if callback is None:
+        return
+    try:
+        callback(stage, current, total)
+    except Exception:
+        logger.debug("Progress callback raised; ignoring", exc_info=True)
 from datetime import datetime, timedelta
 import pickle
 from pathlib import Path
@@ -140,13 +153,19 @@ class FinalRAGChatbot:
     def _load_embeddings_cache(self):
         """Load existing embeddings cache or create new one."""
         cache_path = self._embeddings_cache_path()
-        
+
         try:
             if os.path.exists(cache_path) and self.config["system"]["cache_embeddings"]:
                 with open(cache_path, "rb") as f:
                     cached_data = pickle.load(f)
-                    self.embedding_manager.load_cached_embeddings(cached_data)
-                logger.info("Loaded embeddings from cache")
+                loaded = self.embedding_manager.load_cached_embeddings(cached_data)
+                if loaded:
+                    logger.info("Loaded embeddings from cache")
+                else:
+                    logger.warning(
+                        "Embeddings cache rejected (model/dimension mismatch); "
+                        "next ingest will rebuild against the configured embedding model."
+                    )
             else:
                 logger.info("No embeddings cache found, will create new one")
         except Exception as e:
@@ -187,14 +206,22 @@ class FinalRAGChatbot:
 
         return normalized
 
-    def load_documents(self, source: Union[str, List[str]], document_type: str = "auto") -> bool:
+    def load_documents(
+        self,
+        source: Union[str, List[str]],
+        document_type: str = "auto",
+        progress_callback: Optional[ProgressCallback] = None,
+    ) -> bool:
         """
         Load documents from various sources.
-        
+
         Args:
             source: File path, directory path, or list of paths
             document_type: Type of documents (auto, pdf, txt, json, csv, web)
-            
+            progress_callback: Optional ``(stage, current, total)`` callback. Stages
+                are ``"reading"``, ``"chunking"``, ``"dedup"``, ``"embedding"``,
+                ``"storing"``, and ``"saving_cache"``.
+
         Returns:
             bool: Success status
         """
@@ -202,16 +229,18 @@ class FinalRAGChatbot:
             logger.error("System not initialized")
             self.last_error = "System is not initialized"
             return False
-            
+
         try:
             self.last_error = ""
             self.last_load_summary = ""
             source = self._normalize_source(source)
             logger.info(f"Loading documents from: {source}")
-            
+
+            _safe_report(progress_callback, "reading", None, None)
+
             # Process documents
             documents = self.document_processor.process_documents(source, document_type)
-            
+
             if not documents:
                 self.last_error = (
                     f"No document chunks were processed from {source!r}. "
@@ -219,13 +248,16 @@ class FinalRAGChatbot:
                 )
                 logger.warning(self.last_error)
                 return False
-            
+
+            _safe_report(progress_callback, "chunking", len(documents), len(documents))
+
             # Generate embeddings
             processed_sources = self._unique_document_sources(documents)
             before_sources = self._unique_document_sources(self.embedding_manager.documents)
-            success = self.embedding_manager.add_documents(documents)
+            success = self.embedding_manager.add_documents(documents, progress_callback=progress_callback)
             
             if success:
+                _safe_report(progress_callback, "saving_cache", None, None)
                 self._save_embeddings_cache()
                 added = getattr(self.embedding_manager, "last_added_count", len(documents))
                 skipped = getattr(self.embedding_manager, "last_skipped_count", 0)
@@ -250,61 +282,86 @@ class FinalRAGChatbot:
             logger.error(f"Error loading documents: {e}")
             return False
 
-    def chat(self, query: str, stream: bool = None) -> Union[str, Dict]:
+    def chat(
+        self,
+        query: str,
+        stream: bool = None,
+        progress_callback: Optional[ProgressCallback] = None,
+    ) -> Union[str, Dict]:
         """
         Process a chat query and return response.
-        
+
         Args:
             query: User query
             stream: Whether to stream response (None = use config default)
-            
+            progress_callback: Optional ``(stage, current, total)`` callback. Stages
+                fire in order: ``"validating"``, ``"analyzing"``, ``"retrieving"``,
+                ``"context"``, ``"generating"``, ``"done"``. ``current``/``total``
+                are ``None`` for indeterminate stages and chunk counts for
+                ``"retrieving"`` (``retrieved`` count, ``max_results``).
+
         Returns:
             Response string or dictionary with streaming info
         """
         start_time = datetime.now()
-        
+
         try:
             self.last_error = ""
             if hasattr(self.llm_interface, "last_error"):
                 self.llm_interface.last_error = ""
 
+            _safe_report(progress_callback, "validating", None, None)
+
             # Validate input
             if not validate_input(query, self.config):
                 return "Sorry, your query contains invalid content. Please try again."
-            
+
             # Check role permissions
             if not self._check_permissions(query):
                 return "Sorry, you don't have permission to access this information."
-            
+
             # Update statistics
             self.stats["queries_processed"] += 1
-            
+
             logger.info(f"Processing query from {self.role}: {query[:100]}...")
-            
+
+            _safe_report(progress_callback, "analyzing", None, None)
+
             # Analyze query
             analyzed_query = self.query_analyzer.analyze_query(query, self.role)
-            
+
+            _safe_report(progress_callback, "retrieving", None, self.config["retrieval"]["max_results"])
+
             # Retrieve relevant documents
             relevant_docs = self.embedding_manager.retrieve_documents(
-                analyzed_query, 
+                analyzed_query,
                 max_results=self.config["retrieval"]["max_results"],
                 threshold=self.config["retrieval"]["similarity_threshold"]
             )
-            
+
+            _safe_report(progress_callback, "retrieving", len(relevant_docs), self.config["retrieval"]["max_results"])
+
             if not relevant_docs:
+                _safe_report(progress_callback, "done", None, None)
                 return "I couldn't find any relevant information to answer your question. Please try rephrasing or asking about something else."
-            
+
+            _safe_report(progress_callback, "context", None, None)
+
             # Get conversation context
             conversation_context = self.conversation_manager.get_context(self.role)
-            
+
             # Generate response
             if stream is None:
                 stream = self.config["system"]["enable_streaming"]
-            
+
+            _safe_report(progress_callback, "generating", None, None)
+
             if stream:
                 response = self._generate_streaming_response(query, relevant_docs, conversation_context)
             else:
                 response = self._generate_response(query, relevant_docs, conversation_context)
+
+            _safe_report(progress_callback, "done", None, None)
             
             # Update conversation history
             self.conversation_manager.add_interaction(self.role, query, response, relevant_docs)

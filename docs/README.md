@@ -8,7 +8,7 @@ A Retrieval-Augmented Generation (RAG) chatbot that runs locally against an Olla
 - **MCP server + client**: JSON-RPC 2.0 over stdio, with tools for chat, document loading, search, query analysis, stats, and cache management.
 - **Multi-format ingestion**: PDF (pdfminer.six), DOCX (python-docx, optional), TXT, Markdown, JSON, CSV, and web URLs (requests + BeautifulSoup).
 - **Role-aware behavior**: Admin / Expert / User / Guest roles control response length, MCP tool access, and permission gating.
-- **Persistent embeddings cache**: pickled cache under `data/embeddings/embeddings_cache.pkl`; duplicate chunks are detected on reload.
+- **Persistent embeddings cache**: pickled cache under `data/embeddings/embeddings_cache.pkl` with a versioned header that guards against embedding-model and vector-dimension mismatches. Duplicate chunks are detected by SHA-256 content hash.
 - **Two Streamlit UIs**: a direct-import app (`streamlit_app.py`) and an MCP-backed app (`streamlit_app_mcp.py`).
 
 ## Repository Layout

@@ -25,7 +25,7 @@ ollama pull qwen3:4b-instruct          # default chat model
 ollama pull qwen3-embedding:0.6b       # default embedding model
 ```
 
-You can change the models in `config/config.json` (`llm.model`, `embedding.model`).
+You can change the models in `config/config.json` (`llm.model`, `embedding.model`). Changing `embedding.model` automatically invalidates the persisted cache on next start; the cache header stores the model name and vector dimension and refuses to load a mismatched cache.
 
 ## 4. Verify the Install
 
@@ -115,7 +115,7 @@ python src/examples/mcp_examples.py --interactive   # MCP demo loop
 - **`Ollama service check failed`** — start `ollama serve`, confirm the URL in `config/config.json`, and pull the configured models.
 - **`requests package required`** — the active venv is missing core deps; rerun `pip install -r requirements.txt`.
 - **`Sentence transformers not available`** — only required if you switched `embedding.provider` to `sentence_transformers`; `pip install sentence-transformers` or switch back to `ollama`.
-- **Stale embeddings** — delete `data/embeddings/embeddings_cache.pkl` or call `chatbot.clear_documents(delete_cache=True)`.
+- **Stale embeddings** — delete `data/embeddings/embeddings_cache.pkl` or call `chatbot.clear_documents(delete_cache=True)`. A model-mismatch cache is auto-rejected on load with a `WARNING` log, but you still need to re-ingest the documents.
 - **Logs** — daily files under `data/logs/rag_system_YYYYMMDD.log`. Bump `system.log_level` to `DEBUG` for verbose tracing.
 
 ## 11. Configuration Cheatsheet

@@ -11,9 +11,25 @@ This module handles all embedding-related operations including:
 """
 
 import os
+import hashlib
 import logging
 import pickle
-from typing import List, Dict, Any, Optional, Tuple
+from typing import Callable, List, Dict, Any, Optional, Tuple
+
+CACHE_SCHEMA_VERSION = 1
+
+# Progress callback signature: (stage, current, total) where current/total may be None.
+ProgressCallback = Callable[[str, Optional[int], Optional[int]], None]
+
+
+def _safe_report(callback: Optional[ProgressCallback], stage: str, current: Optional[int] = None, total: Optional[int] = None) -> None:
+    """Invoke a progress callback while swallowing UI-side exceptions."""
+    if callback is None:
+        return
+    try:
+        callback(stage, current, total)
+    except Exception:
+        logger.debug("Progress callback raised; ignoring", exc_info=True)
 
 try:
     import numpy as np
@@ -116,13 +132,21 @@ class EmbeddingManager:
             logger.error(f"Error loading embedding model: {e}")
             raise
 
-    def add_documents(self, documents: List[Dict]) -> bool:
+    def add_documents(
+        self,
+        documents: List[Dict],
+        progress_callback: Optional[ProgressCallback] = None,
+    ) -> bool:
         """
         Add documents and generate embeddings.
-        
+
         Args:
             documents: List of document dictionaries with 'content' and 'metadata'
-            
+            progress_callback: Optional ``(stage, current, total)`` callback invoked
+                during dedup and per-batch embedding. ``current`` and ``total`` are
+                chunk counts; ``stage`` is one of ``"dedup"``, ``"embedding"``,
+                ``"storing"``.
+
         Returns:
             bool: Success status
         """
@@ -134,6 +158,14 @@ class EmbeddingManager:
                 logger.warning("No documents provided")
                 return False
 
+            _safe_report(progress_callback, "dedup", 0, len(documents))
+
+            # Stamp content_hash onto incoming docs so dedup is hash-based
+            for doc in documents:
+                metadata = doc.setdefault("metadata", {})
+                if "content_hash" not in metadata:
+                    metadata["content_hash"] = self._content_hash(doc.get("content", ""))
+
             existing_keys = {self._document_key(doc) for doc in self.documents}
             new_documents = [
                 doc for doc in documents
@@ -143,31 +175,35 @@ class EmbeddingManager:
 
             if not new_documents:
                 logger.info("All provided documents are already loaded; skipping duplicates")
+                _safe_report(progress_callback, "embedding", 0, 0)
                 return True
 
             documents = new_documents
-            
+
             logger.info(f"Adding {len(documents)} documents")
-            
+
             # Extract text content
             texts = [doc["content"] for doc in documents]
-            
+
             # Generate embeddings in batches
             logger.info("Generating embeddings...")
-            new_embeddings = self._generate_embeddings_batch(texts)
+            _safe_report(progress_callback, "embedding", 0, len(texts))
+            new_embeddings = self._generate_embeddings_batch(texts, progress_callback=progress_callback)
             
             if new_embeddings is None:
                 logger.error("Failed to generate embeddings")
                 return False
-            
+
+            _safe_report(progress_callback, "storing", len(documents), len(documents))
+
             # Add to storage
             self.documents.extend(documents)
-            
+
             if self.embeddings is None:
                 self.embeddings = new_embeddings
             else:
                 self.embeddings = np.vstack([self.embeddings, new_embeddings])
-            
+
             logger.info(f"Successfully added {len(documents)} documents. Total: {len(self.documents)}")
             self.last_added_count = len(documents)
             return True
@@ -177,58 +213,80 @@ class EmbeddingManager:
             return False
 
     def _document_key(self, doc: Dict) -> Tuple:
-        """Return a stable key for duplicate document chunk detection."""
+        """Return a stable key for duplicate document chunk detection.
+
+        The key uses a SHA-256 content hash instead of the full content string so
+        repeated ingests of the same chunk are an O(N) hash lookup rather than an
+        O(N*L) string compare.
+        """
         metadata = doc.get("metadata", {})
         chunk_marker = (
             metadata.get("chunk_id"),
             metadata.get("item_id"),
             metadata.get("row_id"),
         )
+        content_hash = metadata.get("content_hash") or self._content_hash(doc.get("content", ""))
         return (
             metadata.get("source", ""),
             metadata.get("file_name", ""),
             metadata.get("type", ""),
             chunk_marker,
-            doc.get("content", ""),
+            content_hash,
         )
 
-    def _generate_embeddings_batch(self, texts: List[str]) -> Optional[np.ndarray]:
+    @staticmethod
+    def _content_hash(content: str) -> str:
+        """Truncated SHA-256 hex digest used as a chunk identifier."""
+        return hashlib.sha256(content.encode("utf-8")).hexdigest()[:16]
+
+    def _generate_embeddings_batch(
+        self,
+        texts: List[str],
+        progress_callback: Optional[ProgressCallback] = None,
+    ) -> Optional[np.ndarray]:
         """Generate embeddings for a batch of texts."""
         try:
             if self.provider == "ollama":
-                return self._generate_ollama_embeddings(texts)
+                return self._generate_ollama_embeddings(texts, progress_callback=progress_callback)
 
             # Split into batches to avoid memory issues
             all_embeddings = []
-            
-            for i in range(0, len(texts), self.batch_size):
+            total = len(texts)
+
+            for i in range(0, total, self.batch_size):
                 batch = texts[i:i + self.batch_size]
-                
+
                 # Truncate texts if they're too long
                 truncated_batch = [
                     text[:self.max_length] if len(text) > self.max_length else text
                     for text in batch
                 ]
-                
+
                 batch_embeddings = self.embedding_model.encode(
                     truncated_batch,
                     convert_to_numpy=True,
                     show_progress_bar=False
                 )
-                
+
                 all_embeddings.append(batch_embeddings)
-            
+                _safe_report(progress_callback, "embedding", min(i + len(batch), total), total)
+
             return np.vstack(all_embeddings)
-            
+
         except Exception as e:
             logger.error(f"Error generating embeddings: {e}")
             return None
 
-    def _generate_ollama_embeddings(self, texts: List[str]) -> Optional[np.ndarray]:
+    def _generate_ollama_embeddings(
+        self,
+        texts: List[str],
+        progress_callback: Optional[ProgressCallback] = None,
+    ) -> Optional[np.ndarray]:
         """Generate embeddings using Ollama's native embedding API."""
         all_embeddings = []
+        total = len(texts)
 
-        for i in range(0, len(texts), self.batch_size):
+        for i in range(0, total, self.batch_size):
             batch = [
                 text[:self.max_length] if len(text) > self.max_length else text
                 for text in texts[i:i + self.batch_size]
@@ -239,6 +297,7 @@ class EmbeddingManager:
                 return None
 
             all_embeddings.extend(embeddings)
+            _safe_report(progress_callback, "embedding", min(i + len(batch), total), total)
 
         return np.array(all_embeddings)
 
@@ -472,26 +531,71 @@ class EmbeddingManager:
             "model_name": self.embedding_model_name
         }
 
-    def load_cached_embeddings(self, cached_data: Dict):
-        """Load embeddings from cache."""
+    def load_cached_embeddings(self, cached_data: Dict) -> bool:
+        """Load embeddings from cache.
+
+        Refuses to load when the cache header reports a different embedding
+        model or vector dimension from the currently configured model. On
+        mismatch the in-memory state is left empty so the next ``add_documents``
+        call rebuilds against the configured model. Returns ``True`` when the
+        cache was loaded, ``False`` when it was rejected or empty.
+        """
         try:
-            self.documents = cached_data.get("documents", [])
+            cached_model = cached_data.get("model_name")
+            if cached_model and cached_model != self.embedding_model_name:
+                logger.warning(
+                    "Embeddings cache was built with model %r but configuration uses %r; "
+                    "ignoring cache and rebuilding.",
+                    cached_model,
+                    self.embedding_model_name,
+                )
+                self.documents = []
+                self.embeddings = None
+                return False
+
             embeddings_data = cached_data.get("embeddings")
-            
+            cached_dim = cached_data.get("dim")
+            if embeddings_data is not None and cached_dim is not None:
+                first_row = embeddings_data[0] if embeddings_data else None
+                actual_dim = len(first_row) if first_row is not None else None
+                if actual_dim is not None and actual_dim != cached_dim:
+                    logger.warning(
+                        "Embeddings cache header reports dim=%s but payload has dim=%s; "
+                        "ignoring cache and rebuilding.",
+                        cached_dim,
+                        actual_dim,
+                    )
+                    self.documents = []
+                    self.embeddings = None
+                    return False
+
+            self.documents = cached_data.get("documents", [])
+
             if embeddings_data is not None:
                 self.embeddings = np.array(embeddings_data)
-            
+
             logger.info(f"Loaded {len(self.documents)} documents from cache")
-            
+            return True
+
         except Exception as e:
             logger.error(f"Error loading cached embeddings: {e}")
+            self.documents = []
+            self.embeddings = None
+            return False
 
     def get_cached_embeddings(self) -> Dict:
-        """Get embeddings data for caching."""
+        """Get embeddings data for caching, including a versioned header."""
+        embeddings_list = self.embeddings.tolist() if self.embeddings is not None else None
+        dim = None
+        if embeddings_list:
+            first_row = embeddings_list[0]
+            dim = len(first_row) if first_row is not None else None
         return {
+            "schema_version": CACHE_SCHEMA_VERSION,
+            "model_name": self.embedding_model_name,
+            "dim": dim,
             "documents": self.documents,
-            "embeddings": self.embeddings.tolist() if self.embeddings is not None else None,
-            "model_name": self.embedding_model_name
+            "embeddings": embeddings_list,
         }
 
     def clear_cache(self):
