@@ -12,7 +12,19 @@ import logging
 import sys
 import os
 from pathlib import Path
-from typing import Dict, List, Optional, Any, Union
+from typing import Callable, Dict, List, Optional, Any, Union
+
+# Notification emitter signature: (method, params) -> None.
+NotifyFn = Callable[[str, Dict[str, Any]], None]
+
+
+def _format_progress_message(stage: str, current: Optional[int], total: Optional[int]) -> str:
+    """Render a stage/current/total triple as a human-readable progress message."""
+    if total and current is not None:
+        return f"{stage}: {current}/{total}"
+    if current is not None:
+        return f"{stage}: {current}"
+    return stage
 
 # Add the parent directory to the Python path to import our modules
 sys.path.append(str(Path(__file__).parent.parent))
@@ -39,19 +51,30 @@ class MCPProtocolHandler:
             "version": "1.0.0"
         }
         
-    async def handle_request(self, request: Dict[str, Any]) -> Dict[str, Any]:
-        """Handle incoming MCP requests."""
+    async def handle_request(
+        self,
+        request: Dict[str, Any],
+        notify: Optional[NotifyFn] = None,
+    ) -> Dict[str, Any]:
+        """Handle incoming MCP requests.
+
+        ``notify`` is an optional callable used to emit JSON-RPC notifications
+        (no ``id``) such as ``notifications/progress``. When the request params
+        include ``_meta.progressToken``, long-running tools fan progress events
+        through this callable.
+        """
         request_id = request.get("id", "unknown")
         try:
             method = request.get("method", "")
             params = request.get("params", {})
-            
+            progress_token = (params.get("_meta") or {}).get("progressToken") if isinstance(params, dict) else None
+
             if method == "initialize":
                 return await self._handle_initialize(request_id, params)
             elif method == "tools/list":
                 return await self._handle_tools_list(request_id)
             elif method == "tools/call":
-                return await self._handle_tool_call(request_id, params)
+                return await self._handle_tool_call(request_id, params, notify=notify, progress_token=progress_token)
             elif method == "resources/list":
                 return await self._handle_resources_list(request_id)
             elif method == "resources/read":
@@ -62,10 +85,35 @@ class MCPProtocolHandler:
                 return await self._handle_prompt_get(request_id, params)
             else:
                 return self._create_error_response(request_id, "Method not found", -32601)
-                
+
         except Exception as e:
             logger.error(f"Error handling request: {e}")
             return self._create_error_response(request_id, str(e), -32603)
+
+    def _build_progress_callback(
+        self,
+        notify: Optional[NotifyFn],
+        progress_token: Optional[str],
+    ) -> Optional[Callable[[str, Optional[int], Optional[int]], None]]:
+        """Return a ``(stage, current, total)`` callback that fans events to MCP notifications."""
+        if notify is None or progress_token is None:
+            return None
+
+        def _emit(stage: str, current: Optional[int], total: Optional[int]) -> None:
+            payload: Dict[str, Any] = {
+                "progressToken": progress_token,
+                "progress": float(current) if current is not None else 0.0,
+                "stage": stage,
+                "message": _format_progress_message(stage, current, total),
+            }
+            if total is not None:
+                payload["total"] = float(total)
+            try:
+                notify("notifications/progress", payload)
+            except Exception:
+                logger.debug("Progress notification emit failed", exc_info=True)
+
+        return _emit
     
     async def _handle_initialize(self, request_id: str, params: Dict[str, Any]) -> Dict[str, Any]:
         """Handle initialization request."""
@@ -177,16 +225,23 @@ class MCPProtocolHandler:
             "result": {"tools": tools}
         }
     
-    async def _handle_tool_call(self, request_id: str, params: Dict[str, Any]) -> Dict[str, Any]:
+    async def _handle_tool_call(
+        self,
+        request_id: str,
+        params: Dict[str, Any],
+        notify: Optional[NotifyFn] = None,
+        progress_token: Optional[str] = None,
+    ) -> Dict[str, Any]:
         """Handle tool call request."""
         tool_name = params.get("name", "")
         arguments = params.get("arguments", {})
-        
+        progress_callback = self._build_progress_callback(notify, progress_token)
+
         try:
             if tool_name == "chat":
-                result = await self._tool_chat(arguments)
+                result = await self._tool_chat(arguments, progress_callback=progress_callback)
             elif tool_name == "load_documents":
-                result = await self._tool_load_documents(arguments)
+                result = await self._tool_load_documents(arguments, progress_callback=progress_callback)
             elif tool_name == "get_stats":
                 result = await self._tool_get_stats(arguments)
             elif tool_name == "clear_conversation":
@@ -217,34 +272,42 @@ class MCPProtocolHandler:
             logger.error(f"Error calling tool {tool_name}: {e}")
             return self._create_error_response(request_id, str(e), -32603)
     
-    async def _tool_chat(self, arguments: Dict[str, Any]) -> str:
+    async def _tool_chat(
+        self,
+        arguments: Dict[str, Any],
+        progress_callback: Optional[Callable[[str, Optional[int], Optional[int]], None]] = None,
+    ) -> str:
         """Handle chat tool call."""
         query = arguments.get("query", "")
         role = arguments.get("role", "User")
         stream = arguments.get("stream", False)
-        
+
         if not query:
             return "Error: Query parameter is required"
-        
+
         rag_system = await self._get_rag_system(role)
-        response = rag_system.chat(query, stream=False)  # Convert to string for MCP
-        
+        response = rag_system.chat(query, stream=False, progress_callback=progress_callback)
+
         if isinstance(response, dict):
             return json.dumps(response, indent=2)
         return str(response)
-    
-    async def _tool_load_documents(self, arguments: Dict[str, Any]) -> str:
+
+    async def _tool_load_documents(
+        self,
+        arguments: Dict[str, Any],
+        progress_callback: Optional[Callable[[str, Optional[int], Optional[int]], None]] = None,
+    ) -> str:
         """Handle load_documents tool call."""
         source = arguments.get("source", "")
         role = arguments.get("role", "Admin")
         document_type = arguments.get("document_type", "auto")
-        
+
         if not source:
             return "Error: Source parameter is required"
-        
+
         rag_system = await self._get_rag_system(role)
-        success = rag_system.load_documents(source, document_type)
-        
+        success = rag_system.load_documents(source, document_type, progress_callback=progress_callback)
+
         if success:
             return rag_system.last_load_summary or f"Successfully loaded documents from: {source}"
         else:
@@ -489,27 +552,35 @@ class MCPStdioServer:
     """
     STDIO-based MCP Server for the Final RAG Chatbot system.
     """
-    
+
     def __init__(self, config_path: str = "config/config.json"):
         """Initialize the STDIO server."""
         self.handler = MCPProtocolHandler(config_path)
-    
+
+    def _notify(self, method: str, params: Dict[str, Any]) -> None:
+        """Emit a JSON-RPC notification (no ``id``) on stdout."""
+        notification = {"jsonrpc": "2.0", "method": method, "params": params}
+        try:
+            print(json.dumps(notification), flush=True)
+        except Exception:
+            logger.debug("Failed to write MCP notification", exc_info=True)
+
     async def run(self):
         """Run the STDIO server."""
         logger.info("Starting Final RAG Chatbot MCP Server (STDIO)")
-        
+
         while True:
             try:
                 # Read JSON-RPC request from stdin
                 line = sys.stdin.readline()
                 if not line:
                     break
-                
+
                 request = json.loads(line.strip())
-                
-                # Handle the request
-                response = await self.handler.handle_request(request)
-                
+
+                # Handle the request — notify hook fans out progress events.
+                response = await self.handler.handle_request(request, notify=self._notify)
+
                 # Send response to stdout
                 print(json.dumps(response), flush=True)
                 

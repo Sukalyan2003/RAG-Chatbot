@@ -397,18 +397,18 @@ class StreamlitRAGApp:
         col1, col2, col3 = st.columns(3)
         
         with col1:
-            if st.button("🔄 Re-run Tests", use_container_width=True):
+            if st.button("🔄 Re-run Tests", width="stretch"):
                 with st.spinner("Running tests..."):
                     st.session_state.test_results = self.run_comprehensive_tests()
                     st.rerun()
         
         with col2:
-            if st.button("💬 Start Chat", use_container_width=True):
+            if st.button("💬 Start Chat", width="stretch"):
                 st.session_state.current_page = "Chat Interface"
                 st.rerun()
         
         with col3:
-            if st.button("📚 Load Documents", use_container_width=True):
+            if st.button("📚 Load Documents", width="stretch"):
                 st.session_state.current_page = "Document Management"
                 st.rerun()
     
@@ -485,7 +485,7 @@ class StreamlitRAGApp:
         
         col1, col2 = st.columns([3, 1])
         with col1:
-            send_button = st.button("📤 Send Message", use_container_width=True)
+            send_button = st.button("📤 Send Message", width="stretch")
         with col2:
             stream_mode = st.checkbox("🔄 Streaming", value=False)
         
@@ -502,47 +502,68 @@ class StreamlitRAGApp:
                 'timestamp': datetime.now()
             })
             
-            # Generate response
-            with st.spinner("🤖 Generating response..."):
-                try:
-                    start_time = time.time()
-                    response = st.session_state.chatbot_instance.chat(user_input, stream=stream_mode)
+            # Generate response — staged status with per-phase feedback
+            stage_labels = {
+                "validating": "🔒 Validating input",
+                "analyzing": "🧠 Analyzing query",
+                "retrieving": "📚 Retrieving relevant context",
+                "context": "🧵 Loading conversation context",
+                "generating": "✍️ Generating answer",
+                "done": "✅ Done",
+            }
+            start_time = time.time()
+            try:
+                with st.status("🤖 Thinking…", expanded=True) as chat_status:
+                    def on_progress(stage, current, total):
+                        elapsed = time.time() - start_time
+                        label = stage_labels.get(stage, stage)
+                        if stage == "retrieving" and current is not None:
+                            label = f"{label} ({current}/{total or '?'} chunks)"
+                        chat_status.update(label=f"{label} · {elapsed:.1f}s")
+                        chat_status.write(label)
+
+                    response = st.session_state.chatbot_instance.chat(
+                        user_input,
+                        stream=stream_mode,
+                        progress_callback=on_progress,
+                    )
                     response_time = time.time() - start_time
-                    
-                    # Handle different response types
-                    if isinstance(response, dict):
-                        response_content = response.get('content', str(response))
-                        sources = response.get('sources', [])
-                    else:
-                        response_content = str(response)
-                        sources = []
-                    
-                    # Add bot response to history
-                    st.session_state.chat_history.append({
-                        'type': 'bot',
-                        'content': response_content,
-                        'sources': sources,
-                        'response_time': response_time,
-                        'timestamp': datetime.now()
-                    })
-                    
-                    # Update performance data
-                    st.session_state.performance_data.append({
-                        'timestamp': datetime.now(),
-                        'response_time': response_time,
-                        'role': st.session_state.current_role,
-                        'query_length': len(user_input)
-                    })
-                    
-                    st.rerun()
-                    
-                except Exception as e:
-                    st.error(f"❌ Error generating response: {e}")
-                    st.session_state.chat_history.append({
-                        'type': 'bot',
-                        'content': f"I apologize, but I encountered an error: {str(e)}",
-                        'timestamp': datetime.now()
-                    })
+                    chat_status.update(label=f"✅ Answer ready · {response_time:.1f}s", state="complete")
+
+                # Handle different response types
+                if isinstance(response, dict):
+                    response_content = response.get('content', str(response))
+                    sources = response.get('sources', [])
+                else:
+                    response_content = str(response)
+                    sources = []
+
+                # Add bot response to history
+                st.session_state.chat_history.append({
+                    'type': 'bot',
+                    'content': response_content,
+                    'sources': sources,
+                    'response_time': response_time,
+                    'timestamp': datetime.now()
+                })
+
+                # Update performance data
+                st.session_state.performance_data.append({
+                    'timestamp': datetime.now(),
+                    'response_time': response_time,
+                    'role': st.session_state.current_role,
+                    'query_length': len(user_input)
+                })
+
+                st.rerun()
+
+            except Exception as e:
+                st.error(f"❌ Error generating response: {e}")
+                st.session_state.chat_history.append({
+                    'type': 'bot',
+                    'content': f"I apologize, but I encountered an error: {str(e)}",
+                    'timestamp': datetime.now()
+                })
     
     def render_document_management(self):
         """Render the document management page."""
@@ -564,7 +585,7 @@ class StreamlitRAGApp:
                 ["auto", "pdf", "txt", "json", "csv", "web"]
             )
         with col2:
-            process_button = st.button("🔄 Process Documents", use_container_width=True)
+            process_button = st.button("🔄 Process Documents", width="stretch")
         
         # Process uploaded files
         if process_button and uploaded_files:
@@ -572,29 +593,62 @@ class StreamlitRAGApp:
                 st.error("❌ Please initialize the chatbot first in the Chat Interface.")
                 return
             
-            progress_bar = st.progress(0)
-            status_text = st.empty()
-            
             try:
                 # Save uploaded files temporarily
                 temp_dir = Path("temp_uploads")
                 temp_dir.mkdir(exist_ok=True)
-                
-                saved_files = []
-                for i, uploaded_file in enumerate(uploaded_files):
-                    file_path = temp_dir / uploaded_file.name
-                    with open(file_path, "wb") as f:
-                        f.write(uploaded_file.getvalue())
-                    saved_files.append(str(file_path))
-                    
-                    progress = (i + 1) / len(uploaded_files) * 0.5
-                    progress_bar.progress(progress)
-                    status_text.text(f"Saving {uploaded_file.name}...")
-                
-                # Process documents
-                status_text.text("Processing documents...")
-                success = st.session_state.chatbot_instance.load_documents(str(temp_dir), document_type)
-                progress_bar.progress(1.0)
+
+                with st.status("📥 Ingesting documents…", expanded=True) as ingest_status:
+                    save_progress = st.progress(0, text="Saving uploads")
+                    saved_files = []
+                    for i, uploaded_file in enumerate(uploaded_files):
+                        file_path = temp_dir / uploaded_file.name
+                        with open(file_path, "wb") as f:
+                            f.write(uploaded_file.getvalue())
+                        saved_files.append(str(file_path))
+                        save_progress.progress(
+                            (i + 1) / len(uploaded_files),
+                            text=f"Saved {uploaded_file.name} ({i + 1}/{len(uploaded_files)})",
+                        )
+
+                    ingest_status.write(f"Saved {len(uploaded_files)} file(s) to {temp_dir}")
+                    encode_progress = st.progress(0, text="Waiting to start encoding")
+
+                    stage_labels = {
+                        "reading": "📖 Reading files",
+                        "chunking": "✂️ Chunking text",
+                        "dedup": "♻️ Deduplicating chunks",
+                        "embedding": "🧬 Embedding chunks",
+                        "storing": "🗄️ Storing embeddings",
+                        "saving_cache": "💾 Persisting cache",
+                    }
+
+                    def on_load_progress(stage, current, total):
+                        label = stage_labels.get(stage, stage)
+                        if stage == "embedding" and total:
+                            ratio = (current or 0) / total if total else 0
+                            encode_progress.progress(
+                                min(ratio, 1.0),
+                                text=f"{label}: {current or 0}/{total} chunks",
+                            )
+                        elif stage in ("dedup", "storing"):
+                            ratio = (current or 0) / total if total else 0
+                            encode_progress.progress(min(ratio, 1.0), text=label)
+                        else:
+                            ingest_status.update(label=label)
+                            ingest_status.write(label)
+
+                    ingest_status.update(label="📖 Processing documents…")
+                    success = st.session_state.chatbot_instance.load_documents(
+                        str(temp_dir),
+                        document_type,
+                        progress_callback=on_load_progress,
+                    )
+                    encode_progress.progress(1.0, text="Encoding complete")
+                    ingest_status.update(
+                        label="✅ Documents ingested" if success else "❌ Ingest failed",
+                        state="complete" if success else "error",
+                    )
                 
                 if success:
                     st.success(f"✅ Successfully processed {len(uploaded_files)} documents!")
@@ -719,7 +773,7 @@ class StreamlitRAGApp:
                 labels={'response_time': 'Response Time (seconds)', 'timestamp': 'Time'}
             )
             fig_time.update_layout(xaxis_title="Time", yaxis_title="Response Time (s)")
-            st.plotly_chart(fig_time, use_container_width=True)
+            st.plotly_chart(fig_time, width="stretch")
         else:
             st.info("Need more data points to show trends")
         
@@ -733,7 +787,7 @@ class StreamlitRAGApp:
                 names=role_counts.index,
                 title='Query Distribution by Role'
             )
-            st.plotly_chart(fig_roles, use_container_width=True)
+            st.plotly_chart(fig_roles, width="stretch")
         
         # Response time distribution
         st.subheader("📈 Response Time Distribution")
@@ -744,7 +798,7 @@ class StreamlitRAGApp:
             title='Response Time Distribution',
             labels={'response_time': 'Response Time (seconds)', 'count': 'Frequency'}
         )
-        st.plotly_chart(fig_hist, use_container_width=True)
+        st.plotly_chart(fig_hist, width="stretch")
         
         # Raw data
         with st.expander("📋 Raw Performance Data"):
@@ -757,18 +811,18 @@ class StreamlitRAGApp:
         # Test controls
         col1, col2, col3 = st.columns(3)
         with col1:
-            if st.button("🔄 Run All Tests", use_container_width=True):
+            if st.button("🔄 Run All Tests", width="stretch"):
                 with st.spinner("Running comprehensive tests..."):
                     st.session_state.test_results = self.run_comprehensive_tests()
                     st.rerun()
         
         with col2:
-            if st.button("🧹 Clear Test Results", use_container_width=True):
+            if st.button("🧹 Clear Test Results", width="stretch"):
                 st.session_state.test_results = {}
                 st.rerun()
         
         with col3:
-            if st.button("📊 System Info", use_container_width=True):
+            if st.button("📊 System Info", width="stretch"):
                 st.info(f"""
                 **Python Version:** {sys.version}
                 **Working Directory:** {os.getcwd()}
@@ -1123,7 +1177,7 @@ class StreamlitRAGApp:
         col1, col2, col3 = st.columns(3)
         
         with col1:
-            if st.button("💾 Save Configuration", use_container_width=True):
+            if st.button("💾 Save Configuration", width="stretch"):
                 # Update configuration
                 new_config = dict(config)
                 new_config["system"] = {
@@ -1169,7 +1223,7 @@ class StreamlitRAGApp:
                     st.error(f"❌ Failed to save configuration: {e}")
         
         with col2:
-            if st.button("🔄 Reset to Defaults", use_container_width=True):
+            if st.button("🔄 Reset to Defaults", width="stretch"):
                 if st.session_state.get('confirm_reset', False):
                     # Reset logic here
                     st.info("Reset functionality would be implemented here")
@@ -1179,7 +1233,7 @@ class StreamlitRAGApp:
                     st.warning("⚠️ Click again to confirm reset")
         
         with col3:
-            if st.button("📤 Export Config", use_container_width=True):
+            if st.button("📤 Export Config", width="stretch"):
                 config_json = json.dumps(st.session_state.config, indent=2)
                 st.download_button(
                     "💾 Download Config",

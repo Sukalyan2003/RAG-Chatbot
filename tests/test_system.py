@@ -245,6 +245,187 @@ class SystemTests(unittest.TestCase):
         self.assertIn("simulated intelligence", response)
         self.assertIn("**Sources**", response)
 
+    def test_cache_mismatch_rejected_on_load(self):
+        install_fake_numeric_modules()
+        from core.embedding_manager import EmbeddingManager
+
+        config = copy.deepcopy(self.config)
+        config["embedding"]["provider"] = "ollama"
+        config["embedding"]["model"] = "configured-model"
+
+        manager = EmbeddingManager(config)
+        manager.documents = [{"content": "x", "metadata": {}}]
+        cached_data = {
+            "schema_version": 1,
+            "model_name": "different-model",
+            "dim": 3,
+            "documents": [{"content": "x", "metadata": {}}],
+            "embeddings": [[0.1, 0.2, 0.3]],
+        }
+
+        loaded = manager.load_cached_embeddings(cached_data)
+
+        self.assertFalse(loaded)
+        self.assertEqual(0, len(manager.documents))
+        self.assertIsNone(manager.embeddings)
+
+    def test_cache_match_loads_successfully(self):
+        install_fake_numeric_modules()
+        from core.embedding_manager import EmbeddingManager
+
+        config = copy.deepcopy(self.config)
+        config["embedding"]["provider"] = "ollama"
+        config["embedding"]["model"] = "configured-model"
+
+        manager = EmbeddingManager(config)
+        cached_data = {
+            "schema_version": 1,
+            "model_name": "configured-model",
+            "dim": 3,
+            "documents": [{"content": "x", "metadata": {}}],
+            "embeddings": [[0.1, 0.2, 0.3]],
+        }
+
+        loaded = manager.load_cached_embeddings(cached_data)
+
+        self.assertTrue(loaded)
+        self.assertEqual(1, len(manager.documents))
+
+    def test_content_hash_dedup_skips_identical_chunk(self):
+        install_fake_numeric_modules()
+        from core.embedding_manager import EmbeddingManager
+
+        config = copy.deepcopy(self.config)
+        config["embedding"]["provider"] = "ollama"
+
+        manager = EmbeddingManager(config)
+        doc = {"content": "Repeated chunk content", "metadata": {"source": "a.txt"}}
+
+        with patch("requests.post", side_effect=fake_ollama_post):
+            self.assertTrue(manager.add_documents([doc.copy()]))
+            self.assertEqual(1, manager.last_added_count)
+            self.assertEqual(0, manager.last_skipped_count)
+
+            self.assertTrue(manager.add_documents([doc.copy()]))
+            self.assertEqual(0, manager.last_added_count)
+            self.assertEqual(1, manager.last_skipped_count)
+
+        self.assertEqual(1, len(manager.documents))
+        self.assertEqual(
+            16, len(manager.documents[0]["metadata"]["content_hash"])
+        )
+
+    def test_retrieve_documents_uses_reranker_when_enabled(self):
+        install_fake_numeric_modules()
+        from core.embedding_manager import EmbeddingManager
+
+        config = copy.deepcopy(self.config)
+        config["embedding"]["provider"] = "ollama"
+        config["retrieval"]["rerank_results"] = True
+        config["retrieval"]["rerank_oversample_factor"] = 4
+        config["retrieval"]["similarity_threshold"] = 0.0
+
+        manager = EmbeddingManager(config)
+        docs = [
+            {
+                "content": f"chunk about artificial intelligence #{i}",
+                "metadata": {"source": f"doc_{i}.txt", "type": "text"},
+            }
+            for i in range(6)
+        ]
+
+        with patch("requests.post", side_effect=fake_ollama_post):
+            self.assertTrue(manager.add_documents(docs))
+            calls = {"count": 0}
+
+            real_rerank = manager.rerank_results
+
+            def spying_rerank(results, query):
+                calls["count"] += 1
+                calls["candidate_count"] = len(results)
+                return real_rerank(results, query)
+
+            manager.rerank_results = spying_rerank
+
+            results = manager.retrieve_documents(
+                "artificial intelligence", max_results=2, threshold=0.0
+            )
+
+        self.assertEqual(1, calls["count"])
+        self.assertGreater(calls["candidate_count"], 2)
+        self.assertLessEqual(len(results), 2)
+
+    def test_mcp_load_documents_emits_progress_notifications(self):
+        install_fake_numeric_modules()
+        from mcp.mcp_server import MCPProtocolHandler
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            docs_dir = temp_path / "documents"
+            docs_dir.mkdir()
+            (docs_dir / "ai.txt").write_text(
+                "Artificial intelligence is the simulation of human intelligence.",
+                encoding="utf-8",
+            )
+
+            override = copy.deepcopy(self.config)
+            override["paths"] = {
+                "data_dir": str(temp_path / "data"),
+                "documents_dir": str(docs_dir),
+                "embeddings_dir": str(temp_path / "embeddings"),
+                "logs_dir": str(temp_path / "logs"),
+                "cache_dir": str(temp_path / "cache"),
+            }
+            override["system"]["cache_embeddings"] = False
+            override["system"]["enable_streaming"] = False
+
+            notifications = []
+
+            def notify(method, params):
+                notifications.append((method, params))
+
+            async def run():
+                handler = MCPProtocolHandler(str(CONFIG))
+                # Reuse our temp config by pre-instantiating the rag_system.
+                from core.final_rag_system import FinalRAGChatbot
+
+                with patch("requests.post", side_effect=fake_ollama_post):
+                    handler.rag_system = FinalRAGChatbot(
+                        role="Admin",
+                        config_path=str(CONFIG),
+                        custom_config=override,
+                    )
+                    return await handler.handle_request(
+                        {
+                            "id": "42",
+                            "method": "tools/call",
+                            "params": {
+                                "name": "load_documents",
+                                "arguments": {
+                                    "source": str(docs_dir),
+                                    "role": "Admin",
+                                },
+                                "_meta": {"progressToken": "tok-1"},
+                            },
+                        },
+                        notify=notify,
+                    )
+
+            with patch("requests.post", side_effect=fake_ollama_post):
+                response = asyncio.run(run())
+
+        self.assertNotIn("error", response)
+        # Server should have emitted at least one notifications/progress event for our token.
+        progress_events = [
+            params
+            for method, params in notifications
+            if method == "notifications/progress" and params.get("progressToken") == "tok-1"
+        ]
+        self.assertGreater(len(progress_events), 0)
+        stages = {event.get("stage") for event in progress_events}
+        # Expect at least the chunking and embedding stages.
+        self.assertIn("embedding", stages)
+
     def test_clear_documents_removes_persisted_cache(self):
         install_fake_numeric_modules()
         from core.final_rag_system import FinalRAGChatbot

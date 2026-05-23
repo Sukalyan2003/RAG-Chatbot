@@ -10,21 +10,30 @@ import asyncio
 import logging
 import subprocess
 import sys
-from typing import Dict, List, Optional, Any, Union
+import uuid
+from typing import Callable, Dict, List, Optional, Any, Union
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
+
+# (stage, current, total) callback shared with the in-process engine.
+ProgressCallback = Callable[[str, Optional[int], Optional[int]], None]
 
 
 class MCPClient:
     """
     Client interface for communicating with the MCP server.
+
+    Runs a persistent reader task that demultiplexes JSON-RPC responses (which
+    have ``id``) from notifications (which have ``method`` but no ``id``).
+    ``notifications/progress`` events are routed to per-token callbacks supplied
+    by the caller via ``progress_callback``.
     """
-    
+
     def __init__(self, server_command: List[str], config_path: str = "config/config.json"):
         """
         Initialize the MCP client.
-        
+
         Args:
             server_command: Command to start the MCP server
             config_path: Path to configuration file
@@ -33,7 +42,10 @@ class MCPClient:
         self.config_path = config_path
         self.process = None
         self.request_id = 0
-    
+        self._pending: Dict[str, "asyncio.Future[Dict[str, Any]]"] = {}
+        self._progress_handlers: Dict[str, ProgressCallback] = {}
+        self._reader_task: Optional[asyncio.Task] = None
+
     async def start_server(self):
         """Start the MCP server process."""
         try:
@@ -44,7 +56,10 @@ class MCPClient:
                 stderr=asyncio.subprocess.PIPE
             )
             logger.info("MCP server started successfully")
-            
+
+            # Start the persistent reader before issuing the first request.
+            self._reader_task = asyncio.create_task(self._reader_loop())
+
             # Initialize the server
             await self._send_request("initialize", {
                 "protocolVersion": "2024-11-05",
@@ -58,11 +73,11 @@ class MCPClient:
                     "version": "1.0.0"
                 }
             })
-            
+
         except Exception as e:
             logger.error(f"Failed to start MCP server: {e}")
             raise
-    
+
     async def stop_server(self):
         """Stop the MCP server process."""
         if self.process:
@@ -80,87 +95,172 @@ class MCPClient:
             except Exception as e:
                 logger.warning(f"Error stopping MCP server: {e!r}")
             finally:
+                if self._reader_task and not self._reader_task.done():
+                    self._reader_task.cancel()
+                self._reader_task = None
+                # Fail any outstanding requests so callers don't hang.
+                for fut in self._pending.values():
+                    if not fut.done():
+                        fut.set_exception(RuntimeError("MCP server stopped before responding"))
+                self._pending.clear()
+                self._progress_handlers.clear()
                 self.process = None
-    
-    async def _send_request(self, method: str, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-        """Send a request to the MCP server."""
+
+    async def _reader_loop(self) -> None:
+        """Read newline-delimited JSON-RPC messages and demux responses vs notifications."""
+        assert self.process and self.process.stdout
+        try:
+            while True:
+                line = await self.process.stdout.readline()
+                if not line:
+                    break
+                decoded = line.decode(errors="replace").strip()
+                if not decoded:
+                    continue
+                try:
+                    message = json.loads(decoded)
+                except json.JSONDecodeError:
+                    logger.warning(f"Ignoring non-JSON MCP stdout line: {decoded[:200]}")
+                    continue
+
+                if not isinstance(message, dict):
+                    continue
+
+                if "id" in message and message["id"] is not None:
+                    request_id = str(message["id"])
+                    fut = self._pending.pop(request_id, None)
+                    if fut and not fut.done():
+                        fut.set_result(message)
+                    continue
+
+                method = message.get("method")
+                if method == "notifications/progress":
+                    params = message.get("params", {}) or {}
+                    token = params.get("progressToken")
+                    handler = self._progress_handlers.get(token) if token else None
+                    if handler:
+                        stage = params.get("stage") or params.get("message") or ""
+                        current = params.get("progress")
+                        total = params.get("total")
+                        try:
+                            handler(
+                                stage,
+                                int(current) if current is not None else None,
+                                int(total) if total is not None else None,
+                            )
+                        except Exception:
+                            logger.debug("Progress handler raised; ignoring", exc_info=True)
+                # Other notifications are ignored for now.
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.warning("MCP reader loop crashed", exc_info=True)
+        finally:
+            for fut in self._pending.values():
+                if not fut.done():
+                    fut.set_exception(RuntimeError("MCP server closed stdout"))
+            self._pending.clear()
+
+    async def _send_request(
+        self,
+        method: str,
+        params: Optional[Dict[str, Any]] = None,
+        progress_callback: Optional[ProgressCallback] = None,
+    ) -> Dict[str, Any]:
+        """Send a request to the MCP server and await the matching response."""
         if not self.process or not self.process.stdin or not self.process.stdout:
             raise RuntimeError("MCP server not started or pipes not available")
-        
+
         self.request_id += 1
+        req_id = str(self.request_id)
+
+        params = dict(params) if params else {}
+        token: Optional[str] = None
+        if progress_callback is not None:
+            token = f"prog-{uuid.uuid4().hex[:12]}"
+            meta = dict(params.get("_meta") or {})
+            meta["progressToken"] = token
+            params["_meta"] = meta
+            self._progress_handlers[token] = progress_callback
+
         request = {
             "jsonrpc": "2.0",
-            "id": str(self.request_id),
+            "id": req_id,
             "method": method,
-            "params": params or {}
+            "params": params,
         }
-        
-        # Send request
+
+        future: "asyncio.Future[Dict[str, Any]]" = asyncio.get_event_loop().create_future()
+        self._pending[req_id] = future
+
         request_line = json.dumps(request) + "\n"
         self.process.stdin.write(request_line.encode())
         await self.process.stdin.drain()
-        
-        # Read response. The server should emit only JSON-RPC on stdout, but
-        # tolerate accidental log lines so one noisy dependency does not break
-        # the interactive client.
-        response = None
-        while True:
-            response_line = await self.process.stdout.readline()
-            if not response_line:
-                stderr = ""
-                if self.process.stderr:
-                    try:
-                        stderr_bytes = await asyncio.wait_for(self.process.stderr.read(), timeout=0.5)
-                        stderr = stderr_bytes.decode(errors="replace").strip()
-                    except asyncio.TimeoutError:
-                        pass
-                detail = f": {stderr}" if stderr else ""
-                raise RuntimeError(f"MCP server closed stdout before responding{detail}")
 
-            decoded = response_line.decode(errors="replace").strip()
-            if not decoded:
-                continue
+        try:
+            response = await future
+        finally:
+            if token is not None:
+                self._progress_handlers.pop(token, None)
+            self._pending.pop(req_id, None)
 
-            try:
-                response = json.loads(decoded)
-                break
-            except json.JSONDecodeError:
-                logger.warning(f"Ignoring non-JSON MCP stdout line: {decoded[:200]}")
-                continue
-        
         if "error" in response:
             raise RuntimeError(f"MCP error: {response['error']}")
-        
+
         return response.get("result", {})
     
-    async def chat(self, query: str, role: str = "User", stream: bool = False) -> str:
-        """Chat with the RAG system through MCP."""
-        result = await self._send_request("tools/call", {
-            "name": "chat",
-            "arguments": {
-                "query": query,
-                "role": role,
-                "stream": stream
-            }
-        })
-        
+    async def chat(
+        self,
+        query: str,
+        role: str = "User",
+        stream: bool = False,
+        progress_callback: Optional[ProgressCallback] = None,
+    ) -> str:
+        """Chat with the RAG system through MCP.
+
+        When ``progress_callback`` is supplied, the server emits
+        ``notifications/progress`` messages mapped to ``(stage, current, total)``.
+        """
+        result = await self._send_request(
+            "tools/call",
+            {
+                "name": "chat",
+                "arguments": {
+                    "query": query,
+                    "role": role,
+                    "stream": stream,
+                },
+            },
+            progress_callback=progress_callback,
+        )
+
         # Extract text from MCP response
         content = result.get("content", [])
         if content and len(content) > 0:
             return content[0].get("text", "")
         return "No response received"
-    
-    async def load_documents(self, source: str, role: str = "Admin", document_type: str = "auto") -> str:
-        """Load documents through MCP."""
-        result = await self._send_request("tools/call", {
-            "name": "load_documents", 
-            "arguments": {
-                "source": source,
-                "role": role,
-                "document_type": document_type
-            }
-        })
-        
+
+    async def load_documents(
+        self,
+        source: str,
+        role: str = "Admin",
+        document_type: str = "auto",
+        progress_callback: Optional[ProgressCallback] = None,
+    ) -> str:
+        """Load documents through MCP with optional progress notifications."""
+        result = await self._send_request(
+            "tools/call",
+            {
+                "name": "load_documents",
+                "arguments": {
+                    "source": source,
+                    "role": role,
+                    "document_type": document_type,
+                },
+            },
+            progress_callback=progress_callback,
+        )
+
         content = result.get("content", [])
         if content and len(content) > 0:
             return content[0].get("text", "")
@@ -341,26 +441,40 @@ class MCPIntegratedRAG:
         if self.use_mcp and self.client:
             await self.client.stop_server()
     
-    async def chat(self, query: str, stream: bool = False) -> str:
-        """Chat with the system."""
+    async def chat(
+        self,
+        query: str,
+        stream: bool = False,
+        progress_callback: Optional[ProgressCallback] = None,
+    ) -> str:
+        """Chat with the system, optionally streaming progress events."""
         if self.use_mcp and self.client:
-            return await self.client.chat(query, self.role, stream)
+            return await self.client.chat(query, self.role, stream, progress_callback=progress_callback)
         else:
             self.direct_rag.role = self.role
-            response = self.direct_rag.chat(query, stream)
+            response = self.direct_rag.chat(query, stream, progress_callback=progress_callback)
             if isinstance(response, dict):
                 return json.dumps(response, indent=2)
             return str(response)
-    
-    async def load_documents(self, source: str, document_type: str = "auto") -> bool:
-        """Load documents."""
+
+    async def load_documents(
+        self,
+        source: str,
+        document_type: str = "auto",
+        progress_callback: Optional[ProgressCallback] = None,
+    ) -> bool:
+        """Load documents, optionally streaming progress events."""
         if self.use_mcp and self.client:
-            response = await self.client.load_documents(source, self.role, document_type)
+            response = await self.client.load_documents(
+                source, self.role, document_type, progress_callback=progress_callback
+            )
             self.last_operation_message = response
             return not response.lower().startswith(("failed", "error"))
         else:
             self.direct_rag.role = self.role
-            success = self.direct_rag.load_documents(source, document_type)
+            success = self.direct_rag.load_documents(
+                source, document_type, progress_callback=progress_callback
+            )
             self.last_operation_message = (
                 self.direct_rag.last_load_summary or f"Successfully loaded documents from: {source}"
                 if success

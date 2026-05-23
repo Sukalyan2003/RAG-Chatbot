@@ -139,7 +139,7 @@ def sidebar():
     )
     
     if document_dir and st.sidebar.button("Load Directory"):
-        run_async(load_document_directory(document_dir))
+        process_uploaded_directory(document_dir)
     
     st.sidebar.markdown("---")
     
@@ -158,8 +158,72 @@ def sidebar():
     if st.sidebar.button("Export Chat"):
         export_chat_history()
 
+INGEST_STAGE_LABELS = {
+    "reading": "📖 Reading files",
+    "chunking": "✂️ Chunking text",
+    "dedup": "♻️ Deduplicating chunks",
+    "embedding": "🧬 Embedding chunks",
+    "storing": "🗄️ Storing embeddings",
+    "saving_cache": "💾 Persisting cache",
+}
+
+def render_response_details(metadata: Dict[str, Any]) -> None:
+    """Render assistant Response Details with retrieved chunks surfaced inline.
+
+    The retrieved-chunks block is what tells you whether the answer was actually
+    grounded in your documents. Each chunk is shown as its own expander titled
+    with the source and similarity score; the content is rendered as markdown
+    so highlighted phrases in the answer are easy to scan against.
+    """
+    if not metadata:
+        return
+
+    chunks = metadata.get("retrieved_chunks") or []
+    count = metadata.get("search_results_count")
+    if count is None:
+        count = len(chunks)
+
+    st.markdown(f"**Retrieved chunks ({count})** — use these to verify grounding.")
+    if not chunks:
+        st.warning(
+            "No chunks were retrieved for this query. The answer could not have been grounded "
+            "in your documents — anything the model said came from its training data."
+        )
+    else:
+        for idx, chunk in enumerate(chunks, start=1):
+            source = chunk.get("source") or chunk.get("metadata", {}).get("source") or "unknown"
+            score = chunk.get("score")
+            score_str = f"score {score:.3f}" if isinstance(score, (int, float)) else "score n/a"
+            with st.expander(f"[{idx}] {Path(str(source)).name} · {score_str}"):
+                content = chunk.get("content") or ""
+                st.markdown(f"> {content}" if content else "_(empty chunk)_")
+                meta_payload = chunk.get("metadata") or {}
+                if meta_payload:
+                    st.caption(f"Source path: `{source}`")
+                    st.json(meta_payload)
+
+    other_meta = {
+        key: value
+        for key, value in metadata.items()
+        if key not in {"retrieved_chunks", "search_results_count"}
+    }
+    if other_meta:
+        with st.expander("Query analysis / debug"):
+            st.json(other_meta)
+
+
+CHAT_STAGE_LABELS = {
+    "validating": "🔒 Validating input",
+    "analyzing": "🧠 Analyzing query",
+    "retrieving": "📚 Retrieving relevant context",
+    "context": "🧵 Loading conversation context",
+    "generating": "✍️ Generating answer",
+    "done": "✅ Done",
+}
+
+
 def process_uploaded_document(uploaded_file):
-    """Process an uploaded document."""
+    """Process an uploaded document using real MCP progress notifications."""
     try:
         # Save uploads under data/documents so cached sources remain valid after restart.
         upload_dir = Path("data/documents/uploads")
@@ -170,11 +234,49 @@ def process_uploaded_document(uploaded_file):
             for char in safe_name
         )
         file_path = upload_dir / safe_name
-        with open(file_path, "wb") as f:
-            f.write(uploaded_file.read())
-        
-        # Load the document
-        success, message = run_async(load_document_file(str(file_path)))
+
+        import time as _time
+        start = _time.time()
+        with st.sidebar.status(f"⏳ Ingesting {safe_name}…", expanded=True) as ingest_status:
+            with open(file_path, "wb") as f:
+                f.write(uploaded_file.read())
+            ingest_status.write("📥 Wrote upload to disk")
+
+            progress_bar = st.sidebar.progress(0.0, text="Waiting for server")
+            success = False
+            message = ""
+            last_stage = ""
+
+            def on_progress(stage, current, total):
+                nonlocal last_stage
+                label = INGEST_STAGE_LABELS.get(stage, stage or "Working")
+                if stage == "embedding" and total:
+                    ratio = (current or 0) / total if total else 0
+                    progress_bar.progress(
+                        min(ratio, 1.0),
+                        text=f"{label}: {current or 0}/{total} chunks",
+                    )
+                elif stage in ("dedup", "storing") and total:
+                    ratio = (current or 0) / total if total else 0
+                    progress_bar.progress(min(ratio, 1.0), text=label)
+                if stage != last_stage:
+                    ingest_status.write(label)
+                    last_stage = stage
+                elapsed = _time.time() - start
+                ingest_status.update(label=f"{label} · {elapsed:.1f}s")
+
+            async def run_ingest():
+                nonlocal success, message
+                success, message = await load_document_file(str(file_path), on_progress)
+
+            run_async(run_ingest())
+            elapsed = _time.time() - start
+            progress_bar.progress(1.0 if success else 0.0, text="Done" if success else "Failed")
+            ingest_status.update(
+                label=f"{'✅ Ingest complete' if success else '❌ Ingest failed'} · {elapsed:.1f}s",
+                state="complete" if success else "error",
+            )
+
         if success:
             st.sidebar.success(message)
         else:
@@ -182,11 +284,11 @@ def process_uploaded_document(uploaded_file):
     except Exception as e:
         st.sidebar.error(f"Error processing document: {e}")
 
-async def load_document_file(file_path: str):
-    """Load a single document file."""
+async def load_document_file(file_path: str, progress_callback=None):
+    """Load a single document file, forwarding MCP progress notifications."""
     try:
         rag_system = await get_rag_system("Admin")  # Use Admin role for document loading
-        success = await rag_system.load_documents(file_path)
+        success = await rag_system.load_documents(file_path, progress_callback=progress_callback)
         message = rag_system.last_operation_message or (
             f"Loaded {Path(file_path).name}" if success else f"Failed to load {Path(file_path).name}"
         )
@@ -194,13 +296,62 @@ async def load_document_file(file_path: str):
     except Exception as e:
         return False, f"Error loading {Path(file_path).name}: {e}"
 
-async def load_document_directory(directory: str):
-    """Load documents from a directory."""
+async def load_document_directory(directory: str, progress_callback=None):
+    """Load documents from a directory, forwarding MCP progress notifications."""
     try:
         rag_system = await get_rag_system("Admin")  # Use Admin role for document loading
-        success = await rag_system.load_documents(directory)
-        message = rag_system.last_operation_message or f"Loaded documents from: {directory}"
-        
+        success = await rag_system.load_documents(directory, progress_callback=progress_callback)
+        message = rag_system.last_operation_message or (
+            f"Loaded documents from: {directory}"
+            if success
+            else f"Failed to load documents from: {directory}"
+        )
+        return success, message
+    except Exception as e:
+        return False, f"Error loading directory: {e}"
+
+
+def process_uploaded_directory(directory: str):
+    """Load a directory with real MCP progress notifications."""
+    try:
+        import time as _time
+        start = _time.time()
+        with st.sidebar.status(f"⏳ Ingesting {directory}…", expanded=True) as ingest_status:
+            progress_bar = st.sidebar.progress(0.0, text="Waiting for server")
+            success = False
+            message = ""
+            last_stage = ""
+
+            def on_progress(stage, current, total):
+                nonlocal last_stage
+                label = INGEST_STAGE_LABELS.get(stage, stage or "Working")
+                if stage == "embedding" and total:
+                    ratio = (current or 0) / total if total else 0
+                    progress_bar.progress(
+                        min(ratio, 1.0),
+                        text=f"{label}: {current or 0}/{total} chunks",
+                    )
+                elif stage in ("dedup", "storing") and total:
+                    ratio = (current or 0) / total if total else 0
+                    progress_bar.progress(min(ratio, 1.0), text=label)
+                if stage != last_stage:
+                    ingest_status.write(label)
+                    last_stage = stage
+                elapsed = _time.time() - start
+                ingest_status.update(label=f"{label} · {elapsed:.1f}s")
+
+            async def run_ingest():
+                nonlocal success, message
+                success, message = await load_document_directory(directory, on_progress)
+
+            run_async(run_ingest())
+            elapsed = _time.time() - start
+            progress_bar.progress(1.0 if success else 0.0, text="Done" if success else "Failed")
+            ingest_status.update(
+                label=f"{'✅ Directory ingested' if success else '❌ Ingest failed'} · {elapsed:.1f}s",
+                state="complete" if success else "error",
+            )
+
         if success:
             st.sidebar.success(message)
         else:
@@ -294,9 +445,9 @@ def main_interface():
         for message in st.session_state.chat_history:
             with st.chat_message(message["role"]):
                 st.markdown(message["content"])
-                if "metadata" in message:
-                    with st.expander("Metadata"):
-                        st.json(message["metadata"])
+                if message.get("metadata"):
+                    with st.expander("Response Details"):
+                        render_response_details(message["metadata"])
     
     # Chat input
     if prompt := st.chat_input("Ask me anything..."):
@@ -311,25 +462,51 @@ def main_interface():
         with st.chat_message("user"):
             st.write(prompt)
         
-        # Generate response
+        # Generate response — real MCP progress notifications drive the status
         with st.chat_message("assistant"):
-            with st.spinner("Thinking..."):
-                response = run_async(generate_response(prompt))
-                st.markdown(response["content"])
-                
-                # Show metadata if available
-                if response.get("metadata"):
-                    with st.expander("Response Details"):
-                        st.json(response["metadata"])
+            import time as _time
+            start = _time.time()
+            with st.status("🤖 Thinking…", expanded=True) as chat_status:
+                response = None
+                last_stage = ""
+
+                def on_progress(stage, current, total):
+                    nonlocal last_stage
+                    label = CHAT_STAGE_LABELS.get(stage, stage or "Working")
+                    if stage == "retrieving" and current is not None:
+                        label = f"{label} ({current}/{total or '?'} chunks)"
+                    if stage != last_stage:
+                        chat_status.write(label)
+                        last_stage = stage
+                    elapsed = _time.time() - start
+                    chat_status.update(label=f"{label} · {elapsed:.1f}s")
+
+                async def run_with_progress():
+                    nonlocal response
+                    response = await generate_response(prompt, on_progress)
+
+                run_async(run_with_progress())
+                response_time = _time.time() - start
+                chat_status.update(
+                    label=f"✅ Answer ready · {response_time:.1f}s",
+                    state="complete",
+                )
+
+            st.markdown(response["content"])
+
+            # Show metadata if available, with retrieved chunks surfaced inline
+            if response.get("metadata"):
+                with st.expander("Response Details", expanded=True):
+                    render_response_details(response["metadata"])
         
         # Add assistant response to chat history
         st.session_state.chat_history.append(response)
 
-async def generate_response(prompt: str) -> Dict[str, Any]:
+async def generate_response(prompt: str, progress_callback=None) -> Dict[str, Any]:
     """Generate response using the RAG system."""
     try:
         rag_system = await get_rag_system()
-        
+
         # Validate input
         if not validate_input(prompt, {}):  # Use empty config for basic validation
             return {
@@ -337,25 +514,27 @@ async def generate_response(prompt: str) -> Dict[str, Any]:
                 "content": "Sorry, your input contains invalid content. Please try again.",
                 "timestamp": datetime.now().isoformat()
             }
-        
-        # Generate response
-        response_text = await rag_system.chat(prompt)
+
+        # Generate response — progress notifications drive the UI status
+        response_text = await rag_system.chat(prompt, progress_callback=progress_callback)
         
         # Get additional metadata
         try:
             query_analysis = await rag_system.analyze_query(prompt)
             search_results = await rag_system.search_documents(prompt, max_results=3)
-            
+
             metadata = {
                 "query_analysis": query_analysis,
-                "search_results": len(search_results),
+                "search_results_count": len(search_results),
+                "retrieved_chunks": search_results,
                 "role": st.session_state.current_role,
-                "mcp_enabled": st.session_state.mcp_enabled
+                "mcp_enabled": st.session_state.mcp_enabled,
             }
-        except:
+        except Exception as meta_exc:
             metadata = {
                 "role": st.session_state.current_role,
-                "mcp_enabled": st.session_state.mcp_enabled
+                "mcp_enabled": st.session_state.mcp_enabled,
+                "metadata_error": str(meta_exc),
             }
         
         return {
@@ -392,7 +571,7 @@ def analytics_tab():
                     for key, value in st.session_state.system_stats.items()
                 ]
             )
-            st.dataframe(stats_df, use_container_width=True, hide_index=True)
+            st.dataframe(stats_df, width="stretch", hide_index=True)
         
         with col2:
             st.subheader("Usage Overview")
@@ -431,7 +610,7 @@ def documents_tab():
             "chunks": "Chunks",
             "source": "Source",
         })
-        st.dataframe(docs_df, use_container_width=True, hide_index=True)
+        st.dataframe(docs_df, width="stretch", hide_index=True)
     else:
         st.info("No documents loaded. Use the sidebar to upload or load documents.")
 
