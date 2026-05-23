@@ -352,12 +352,18 @@ class EmbeddingManager:
     def retrieve_documents(self, query: str, max_results: int = 5, threshold: float = 0.3) -> List[Dict]:
         """
         Retrieve relevant documents based on query similarity.
-        
+
+        When ``retrieval.rerank_results`` is enabled, an oversampled candidate
+        set (``max_results * rerank_oversample_factor``) is fetched from dense
+        cosine similarity, passed through ``rerank_results``, and trimmed to
+        ``max_results``. When reranking is disabled, dense top-K is returned
+        directly.
+
         Args:
             query: Search query
             max_results: Maximum number of results to return
             threshold: Minimum similarity threshold
-            
+
         Returns:
             List of relevant documents with similarity scores
         """
@@ -365,33 +371,42 @@ class EmbeddingManager:
             if self.embeddings is None or len(self.documents) == 0:
                 logger.warning("No documents available for retrieval")
                 return []
-            
+
+            retrieval_config = self.config.get("retrieval", {})
+            rerank_enabled = retrieval_config.get("rerank_results", False)
+            oversample_factor = retrieval_config.get("rerank_oversample_factor", 4)
+
+            candidate_limit = max_results * oversample_factor if rerank_enabled else max_results * 2
+
             # Generate query embedding
             query_embedding = self._embed_query(query)
-            
+
             # Calculate similarities
             similarities = cosine_similarity(query_embedding, self.embeddings)[0]
-            
+
             # Get indices sorted by similarity (descending)
             sorted_indices = np.argsort(similarities)[::-1]
-            
-            # Filter by threshold and limit results
-            relevant_docs = []
-            
-            for idx in sorted_indices[:max_results * 2]:  # Get more than needed in case of filtering
+
+            # Collect threshold-passing candidates up to the oversampled cap
+            candidates = []
+            for idx in sorted_indices[:candidate_limit]:
                 similarity = similarities[idx]
-                
                 if similarity >= threshold:
                     doc = self.documents[idx].copy()
                     doc["similarity_score"] = float(similarity)
-                    relevant_docs.append(doc)
-                    
-                    if len(relevant_docs) >= max_results:
-                        break
-            
-            logger.info(f"Retrieved {len(relevant_docs)} relevant documents for query")
+                    candidates.append(doc)
+
+            if rerank_enabled and candidates:
+                candidates = self.rerank_results(candidates, query)
+
+            relevant_docs = candidates[:max_results]
+
+            logger.info(
+                "Retrieved %s relevant documents for query (candidates=%s, rerank=%s)",
+                len(relevant_docs), len(candidates), rerank_enabled,
+            )
             return relevant_docs
-            
+
         except Exception as e:
             logger.error(f"Error retrieving documents: {e}")
             return []

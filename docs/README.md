@@ -54,7 +54,7 @@ A Retrieval-Augmented Generation (RAG) chatbot that runs locally against an Olla
 - `ollama` (default) — POSTs to `/api/embed` (batch) and falls back to `/api/embeddings` (legacy single-prompt) for older Ollama builds.
 - `sentence_transformers` — local fallback if you prefer not to run an embedding server.
 
-Similarity uses cosine similarity from scikit-learn over a stacked NumPy matrix. The manager exposes add / retrieve / update / remove / search-by-metadata, plus pickle import/export and an optional re-ranker that biases by content length and document type.
+Similarity uses cosine similarity from scikit-learn over a stacked NumPy matrix. Retrieval oversamples a wider candidate pool (`retrieval.max_results * retrieval.rerank_oversample_factor`), feeds it through `rerank_results`, and trims to `retrieval.max_results`. The manager also exposes add / retrieve / update / remove / search-by-metadata and pickle import/export.
 
 ### `src/core/llm_interface.py`
 `LLMInterface` supports `ollama` (POST `/api/chat`) and `local` / chat-completion compatible providers via the optional `openai` Python package. It also exposes helpers used by the broader system: `check_relevance`, `summarize_text`, `extract_keywords`, `classify_query`, `generate_questions`, `evaluate_answer`, and `is_available` health probe.
@@ -71,7 +71,27 @@ Logging (with optional Rich), input validation against a denylist of script/SQL/
 ## MCP Layer
 
 ### `src/mcp/mcp_server.py`
-`MCPProtocolHandler` implements the JSON-RPC 2.0 surface (initialize, `tools/list`, `tools/call`, `resources/list`, `resources/read`, `prompts/list`, `prompts/get`). `MCPStdioServer` reads requests from stdin and writes responses to stdout, with logs routed to stderr so they don't corrupt the protocol stream.
+`MCPProtocolHandler` implements the JSON-RPC 2.0 surface (initialize, `tools/list`, `tools/call`, `resources/list`, `resources/read`, `prompts/list`, `prompts/get`). It also emits `notifications/progress` for long-running tools (`chat`, `load_documents`) when the caller supplies `_meta.progressToken` on the request — see the "Progress notifications" section below. `MCPStdioServer` reads requests from stdin and writes responses and notifications to stdout (newline-delimited JSON-RPC), with logs routed to stderr so they don't corrupt the protocol stream.
+
+### Progress notifications
+
+`chat` and `load_documents` accept an optional `_meta.progressToken` field. When supplied, the server emits notifications shaped as:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "method": "notifications/progress",
+  "params": {
+    "progressToken": "prog-abcd1234",
+    "progress": 64,
+    "total": 512,
+    "stage": "embedding",
+    "message": "embedding: 64/512"
+  }
+}
+```
+
+Stages for `load_documents`: `reading`, `chunking`, `dedup`, `embedding`, `storing`, `saving_cache`. Stages for `chat`: `validating`, `analyzing`, `retrieving`, `context`, `generating`, `done`. The bundled `MCPClient` exposes this through a `progress_callback=(stage, current, total) -> None` argument; the persistent reader task demultiplexes responses from notifications so callers see real-time progress without managing tokens directly.
 
 Tools (7):
 
@@ -106,7 +126,7 @@ Prompts:
 
 - `llm` — provider (`ollama` default), `base_url`, `model` (`qwen3:4b-instruct` by default), temperature, token/context limits, timeout.
 - `embedding` — provider (`ollama` default), `model` (`qwen3-embedding:0.6b` by default), batch size, max length, device, timeout.
-- `retrieval` — `similarity_threshold` (0.3), `max_results` (5), `chunk_size` (1000), `chunk_overlap` (200), `rerank_results`.
+- `retrieval` — `similarity_threshold` (0.3), `max_results` (5), `chunk_size` (1000), `chunk_overlap` (200), `rerank_results`, `rerank_oversample_factor` (4).
 - `system` — log level, conversation history cap, source attribution, streaming, cache flag, session timeout.
 - `mcp` — `enabled`, server timeout, protocol version (`2024-11-05`), stdio buffer size, optional HTTP/WebSocket transport flags.
 - `roles` — per-role permissions, response length, access level, allowed MCP tools.

@@ -463,13 +463,12 @@ class FinalRAGChatbot:
         Response style: {role_config.get('response_length', 'concise')}
         
         Guidelines:
-        - Always be accurate and helpful
-        - Use the provided context to answer questions
-        - If you don't know something, say so
-        - Keep responses professional and respectful
-        - Cite sources when possible
-        - Use readable Markdown: short paragraphs, bullet lists, and tables when helpful
-        - Do not append your own source list; the system adds sources separately
+        - Answer ONLY from the provided context. Do not supplement with general knowledge, training data, encyclopedic background, or "standard" definitions.
+        - If the context does not contain enough information to answer the question, reply exactly: "The provided documents do not cover this." and stop. Do not guess, do not fall back to general knowledge, and do not add a disclaimer pointing to outside sources.
+        - Never write phrases like "based on general knowledge", "as per standard principles", "according to NIST/ISO/textbooks", or similar — if it isn't in the context, it doesn't belong in the answer.
+        - Keep responses professional and respectful.
+        - Use readable Markdown: short paragraphs, bullet lists, and tables when helpful.
+        - Do not append your own source list; the system adds sources separately.
         """
         
         if role_config.get('response_length') == 'brief':

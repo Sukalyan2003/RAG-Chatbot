@@ -6,9 +6,10 @@ The Model Context Protocol (MCP) layer exposes the RAG system as a JSON-RPC 2.0 
 
 - A versioned protocol (`2024-11-05`) with `initialize`, `tools/list`, `tools/call`, `resources/list`, `resources/read`, `prompts/list`, and `prompts/get`.
 - Seven tools (`chat`, `load_documents`, `search_documents`, `analyze_query`, `get_stats`, `clear_conversation`, `clear_documents`).
+- `notifications/progress` events for the long-running tools (`chat`, `load_documents`) when the caller supplies `_meta.progressToken` — see [Progress notifications](#progress-notifications) below.
 - Resources for conversation history (per role), the live config, and the document index.
 - A `system_prompt` prompt template that returns the role-conditioned system prompt the chatbot uses internally.
-- An async Python client (`MCPClient`) and a higher-level wrapper (`MCPIntegratedRAG`) for in-process usage.
+- An async Python client (`MCPClient`) with a persistent reader that demuxes responses from progress notifications, and a higher-level wrapper (`MCPIntegratedRAG`) for in-process usage.
 
 ## Install
 
@@ -68,6 +69,53 @@ Logs go to stderr; stdout is reserved for JSON-RPC frames so a misbehaving log l
 | `get_stats` | — | `role` | JSON with counters, uptime, doc/chunk counts, last error. |
 | `clear_conversation` | — | `role` | Confirmation string. |
 | `clear_documents` | — | `role` (default `Admin`), `delete_cache` (true) | JSON with `documents_loaded`, `chunks_loaded`, `cache_deleted`, `cache_path`. |
+
+## Progress notifications
+
+`chat` and `load_documents` are long-running. Clients can opt in to per-stage progress by including a `_meta.progressToken` in the request params:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": "12",
+  "method": "tools/call",
+  "params": {
+    "name": "load_documents",
+    "arguments": {"source": "data/documents/", "role": "Admin"},
+    "_meta": {"progressToken": "prog-abcd1234"}
+  }
+}
+```
+
+The server then emits zero or more notifications before the final response:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "method": "notifications/progress",
+  "params": {
+    "progressToken": "prog-abcd1234",
+    "progress": 64,
+    "total": 512,
+    "stage": "embedding",
+    "message": "embedding: 64/512"
+  }
+}
+```
+
+| Tool | Stages |
+|------|--------|
+| `load_documents` | `reading`, `chunking`, `dedup`, `embedding`, `storing`, `saving_cache` |
+| `chat` | `validating`, `analyzing`, `retrieving`, `context`, `generating`, `done` |
+
+The bundled `MCPClient` handles tokens internally — pass `progress_callback=(stage, current, total) -> None` to `chat` or `load_documents` and the persistent reader will route notifications to your callback.
+
+```python
+def on_progress(stage, current, total):
+    print(f"[{stage}] {current}/{total}")
+
+await client.load_documents("data/documents/", progress_callback=on_progress)
+```
 
 ## Resource Reference
 
