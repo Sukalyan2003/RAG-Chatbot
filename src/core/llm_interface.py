@@ -10,7 +10,7 @@ It handles prompt formatting, response generation, and error handling.
 """
 
 import logging
-from typing import Dict, List, Optional, Any
+from typing import Dict, Iterator, List, Optional, Any, Union
 import json
 
 try:
@@ -87,38 +87,44 @@ class LLMInterface:
             logger.error(f"Error initializing LLM client: {e}")
             raise
 
-    def generate_response(self, query: str, context: str = "", conversation_history: str = "", 
-                         system_prompt: str = "") -> str:
+    def generate_response(
+        self,
+        query: str,
+        context: str = "",
+        conversation_history: str = "",
+        system_prompt: str = "",
+        stream: bool = False,
+    ) -> Union[str, Iterator[Dict[str, Any]]]:
         """
         Generate a response to a query with context.
-        
+
         Args:
             query: User query
             context: Relevant document context
             conversation_history: Previous conversation context
             system_prompt: System prompt for the LLM
-            
+            stream: When True, return a generator of
+                ``{"content": delta, "done": bool, "stats": {...}}``
+                chunks. The final chunk has ``done=True`` and may carry
+                Ollama token-count stats. Only the Ollama provider streams;
+                other providers fall back to a single-chunk generator.
+
         Returns:
-            Generated response string
+            Generated response string, or a generator of chunk dicts when
+            ``stream=True``.
         """
+        formatted_prompt = self._format_prompt(query, context, conversation_history)
+        messages: List[Dict[str, str]] = []
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
+        messages.append({"role": "user", "content": formatted_prompt})
+
+        if stream:
+            return self._stream_llm(messages)
+
         try:
             self.last_error = ""
-            # Prepare the prompt
-            formatted_prompt = self._format_prompt(query, context, conversation_history)
-            
-            # Create messages
-            messages = []
-            
-            if system_prompt:
-                messages.append({"role": "system", "content": system_prompt})
-            
-            messages.append({"role": "user", "content": formatted_prompt})
-            
-            # Generate response
-            response = self._call_llm(messages)
-            
-            return response
-            
+            return self._call_llm(messages)
         except Exception as e:
             self.last_error = str(e)
             logger.error(f"Error generating response: {e}")
@@ -126,6 +132,34 @@ class LLMInterface:
                 "I couldn't get a response from the configured LLM. "
                 f"Last error: {self.last_error}"
             )
+
+    def _stream_llm(self, messages: List[Dict]) -> Iterator[Dict[str, Any]]:
+        """Yield streaming chunks for a chat call.
+
+        Errors are reported in the final ``done`` chunk under ``stats.error``
+        and stored in ``self.last_error`` so callers can detect failures
+        without try/except around the generator consumer.
+        """
+        self.last_error = ""
+        try:
+            if self.provider == "ollama":
+                yield from self._call_ollama_stream(messages)
+                return
+            # Fallback for non-Ollama providers: single-chunk pseudo-stream.
+            text = self._call_llm(messages)
+            yield {"content": text, "done": False}
+            yield {"content": "", "done": True, "stats": {}}
+        except Exception as e:
+            self.last_error = str(e)
+            logger.error(f"Error streaming response: {e}")
+            yield {
+                "content": (
+                    "I couldn't get a response from the configured LLM. "
+                    f"Last error: {self.last_error}"
+                ),
+                "done": True,
+                "stats": {"error": self.last_error},
+            }
 
     def _format_prompt(self, query: str, context: str = "", conversation_history: str = "") -> str:
         """Format the prompt with query and context."""
@@ -185,6 +219,57 @@ class LLMInterface:
         if content is None:
             raise ValueError("Ollama response did not include message.content")
         return content
+
+    def _call_ollama_stream(self, messages: List[Dict]) -> Iterator[Dict[str, Any]]:
+        """Stream Ollama's native chat API as NDJSON lines.
+
+        Yields ``{"content": delta, "done": False}`` for each token chunk
+        and a final ``{"content": "", "done": True, "stats": {...}}`` that
+        carries ``eval_count``/``prompt_eval_count`` and timing fields when
+        Ollama reports them.
+        """
+        response = requests.post(
+            f"{self.llm_config['base_url']}/api/chat",
+            json={
+                "model": self.llm_config["model"],
+                "messages": messages,
+                "stream": True,
+                "options": {
+                    "temperature": self.llm_config.get("temperature", 0.7),
+                    "num_predict": self.llm_config.get("max_tokens", 2000),
+                    "num_ctx": self.llm_config.get("context_window", 8192),
+                },
+            },
+            timeout=self.llm_config.get("timeout", 30),
+            stream=True,
+        )
+        response.raise_for_status()
+
+        stats: Dict[str, Any] = {}
+        try:
+            for raw_line in response.iter_lines():
+                if not raw_line:
+                    continue
+                try:
+                    chunk = json.loads(raw_line)
+                except json.JSONDecodeError:
+                    logger.warning("Ollama stream: skipping non-JSON line")
+                    continue
+
+                delta = chunk.get("message", {}).get("content", "")
+                if delta:
+                    yield {"content": delta, "done": False}
+
+                if chunk.get("done"):
+                    for key in ("eval_count", "prompt_eval_count", "total_duration",
+                                "load_duration", "eval_duration", "prompt_eval_duration"):
+                        if key in chunk:
+                            stats[key] = chunk[key]
+                    break
+        finally:
+            response.close()
+
+        yield {"content": "", "done": True, "stats": stats}
 
     def check_relevance(self, query: str, summaries: Dict[str, str]) -> List[str]:
         """

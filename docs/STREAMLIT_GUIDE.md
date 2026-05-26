@@ -42,6 +42,13 @@ Sidebar controls:
 - **Refresh Stats** — re-pulls counters from the engine.
 - **Export Chat** — turns the current session into a CSV download.
 
+## Streaming responses
+
+Set `system.enable_streaming: true` in `config/config.json` to render Ollama answers token-by-token.
+
+- **Direct UI (`streamlit_app.py`)** — tick the "🔄 Streaming" checkbox on the chat page. `FinalRAGChatbot.chat(stream=True)` returns an iterator of text deltas which the UI hands to `st.write_stream`. The `**Sources**` block is appended as the final delta after the model finishes.
+- **MCP UI (`streamlit_app_mcp.py`)** — when `system.enable_streaming` is on **and** the "Use MCP Protocol" toggle is off, the UI streams from the in-process engine via `MCPIntegratedRAG.chat_stream`. With MCP on, streaming over JSON-RPC notifications is deferred (Phase 13 in the roadmap), so the UI renders the full answer once the MCP `chat` tool returns.
+
 ## Session State
 
 The MCP UI keeps one asyncio event loop per Streamlit session in `st.session_state.async_loop`. This is important: MCP child-process pipes must be polled from the same loop that created them. Don't replace it with `asyncio.run(...)` calls — each new loop would close the previous pipes.

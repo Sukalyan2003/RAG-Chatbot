@@ -426,6 +426,125 @@ class SystemTests(unittest.TestCase):
         # Expect at least the chunking and embedding stages.
         self.assertIn("embedding", stages)
 
+    def test_llm_interface_streams_ndjson_chunks(self):
+        from core.llm_interface import LLMInterface
+
+        ndjson_lines = [
+            json.dumps({"message": {"content": "Hello"}, "done": False}),
+            json.dumps({"message": {"content": ", "}, "done": False}),
+            json.dumps({"message": {"content": "world"}, "done": False}),
+            json.dumps(
+                {
+                    "message": {"content": ""},
+                    "done": True,
+                    "eval_count": 3,
+                    "prompt_eval_count": 5,
+                }
+            ),
+        ]
+
+        class FakeStreamResponse:
+            def __init__(self, lines):
+                self._lines = [line.encode("utf-8") for line in lines]
+
+            def raise_for_status(self):
+                return None
+
+            def iter_lines(self):
+                yield from self._lines
+
+            def close(self):
+                return None
+
+        def fake_post(url, json=None, timeout=None, stream=False):
+            assert stream is True
+            assert (json or {}).get("stream") is True
+            return FakeStreamResponse(ndjson_lines)
+
+        config = copy.deepcopy(self.config)
+        config["llm"]["provider"] = "ollama"
+
+        llm = LLMInterface(config)
+        with patch("requests.post", side_effect=fake_post):
+            chunks = list(
+                llm.generate_response(
+                    query="hi", context="ctx", stream=True
+                )
+            )
+
+        deltas = [c["content"] for c in chunks if not c["done"]]
+        self.assertEqual(["Hello", ", ", "world"], deltas)
+        final = chunks[-1]
+        self.assertTrue(final["done"])
+        self.assertEqual(3, final["stats"].get("eval_count"))
+        self.assertEqual(5, final["stats"].get("prompt_eval_count"))
+
+    def test_chat_stream_yields_tokens_and_appends_sources(self):
+        install_fake_numeric_modules()
+        from core.final_rag_system import FinalRAGChatbot
+
+        ndjson_lines = [
+            json.dumps({"message": {"content": "Artificial "}, "done": False}),
+            json.dumps({"message": {"content": "intelligence."}, "done": False}),
+            json.dumps({"message": {"content": ""}, "done": True}),
+        ]
+
+        class FakeStreamResponse:
+            def __init__(self, lines):
+                self._lines = [line.encode("utf-8") for line in lines]
+
+            def raise_for_status(self):
+                return None
+
+            def iter_lines(self):
+                yield from self._lines
+
+            def close(self):
+                return None
+
+        def fake_post(url, json=None, timeout=None, stream=False):
+            if url.endswith("/api/chat") and stream:
+                return FakeStreamResponse(ndjson_lines)
+            # Reuse the canned non-stream Ollama helper for embeds and the
+            # non-streaming chat fallback used during ingest.
+            return fake_ollama_post(url, json=json, timeout=timeout)
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            docs_dir = temp_path / "documents"
+            docs_dir.mkdir()
+            (docs_dir / "ai.txt").write_text(
+                "Artificial intelligence is the simulation of human intelligence.",
+                encoding="utf-8",
+            )
+
+            config = copy.deepcopy(self.config)
+            config["paths"] = {
+                "data_dir": str(temp_path / "data"),
+                "documents_dir": str(docs_dir),
+                "embeddings_dir": str(temp_path / "embeddings"),
+                "logs_dir": str(temp_path / "logs"),
+                "cache_dir": str(temp_path / "cache"),
+            }
+            config["system"]["cache_embeddings"] = False
+            config["system"]["enable_streaming"] = True
+
+            with patch("requests.post", side_effect=fake_post):
+                chatbot = FinalRAGChatbot(config_path=str(CONFIG), custom_config=config)
+                self.assertTrue(chatbot.load_documents(str(docs_dir)))
+                stream = chatbot.chat(
+                    "What is artificial intelligence?", stream=True
+                )
+                deltas = list(stream)
+
+        text = "".join(deltas)
+        # Token deltas plus the appended source block must show up in order.
+        self.assertIn("Artificial intelligence.", text)
+        self.assertIn("**Sources**", text)
+        # The source block must arrive after the model deltas, not be
+        # interleaved with them.
+        self.assertLess(text.index("Artificial intelligence."), text.index("**Sources**"))
+
     def test_clear_documents_removes_persisted_cache(self):
         install_fake_numeric_modules()
         from core.final_rag_system import FinalRAGChatbot

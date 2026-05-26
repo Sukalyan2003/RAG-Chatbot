@@ -455,7 +455,47 @@ class MCPIntegratedRAG:
             response = self.direct_rag.chat(query, stream, progress_callback=progress_callback)
             if isinstance(response, dict):
                 return json.dumps(response, indent=2)
+            if not isinstance(response, str):
+                # Streaming path returns a generator — collapse to a string
+                # here so the async surface stays string-typed. Callers that
+                # want true token streaming should use chat_stream().
+                return "".join(response)
             return str(response)
+
+    def chat_stream(
+        self,
+        query: str,
+        progress_callback: Optional[ProgressCallback] = None,
+    ):
+        """Yield text deltas from the underlying engine.
+
+        Only the direct-import path streams tokens; MCP streaming over
+        JSON-RPC notifications is deferred. When MCP is enabled this method
+        falls back to a single-chunk iterator carrying the full answer
+        (still useful for ``st.write_stream`` consumers that want one
+        consistent code path).
+        """
+        if self.use_mcp and self.client:
+            async def _one_shot():
+                text = await self.client.chat(
+                    query, self.role, False, progress_callback=progress_callback
+                )
+                return text
+
+            loop = asyncio.get_event_loop()
+            text = loop.run_until_complete(_one_shot())
+            yield text
+            return
+
+        self.direct_rag.role = self.role
+        response = self.direct_rag.chat(
+            query, stream=True, progress_callback=progress_callback
+        )
+        if isinstance(response, str):
+            yield response
+            return
+        for delta in response:
+            yield delta
 
     async def load_documents(
         self,

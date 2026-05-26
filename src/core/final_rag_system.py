@@ -20,7 +20,7 @@ import os
 import logging
 import asyncio
 import re
-from typing import Callable, Dict, List, Optional, Any, Union
+from typing import Callable, Dict, Iterator, List, Optional, Any, Union
 
 # (stage, current, total) progress callback signature shared across the engine.
 ProgressCallback = Callable[[str, Optional[int], Optional[int]], None]
@@ -287,7 +287,7 @@ class FinalRAGChatbot:
         query: str,
         stream: bool = None,
         progress_callback: Optional[ProgressCallback] = None,
-    ) -> Union[str, Dict]:
+    ) -> Union[str, Iterator[str]]:
         """
         Process a chat query and return response.
 
@@ -301,7 +301,10 @@ class FinalRAGChatbot:
                 ``"retrieving"`` (``retrieved`` count, ``max_results``).
 
         Returns:
-            Response string or dictionary with streaming info
+            Response string when ``stream`` is False. When True, an iterator
+            of text deltas suitable for ``st.write_stream``; the source block
+            is appended as the final delta and conversation history is
+            recorded after the stream is fully consumed.
         """
         start_time = datetime.now()
 
@@ -357,15 +360,23 @@ class FinalRAGChatbot:
             _safe_report(progress_callback, "generating", None, None)
 
             if stream:
-                response = self._generate_streaming_response(query, relevant_docs, conversation_context)
-            else:
-                response = self._generate_response(query, relevant_docs, conversation_context)
+                # Streaming path returns an iterator; finalization happens
+                # inside the generator once the consumer drains it.
+                return self._generate_streaming_response(
+                    query,
+                    relevant_docs,
+                    conversation_context,
+                    start_time=start_time,
+                    progress_callback=progress_callback,
+                )
+
+            response = self._generate_response(query, relevant_docs, conversation_context)
 
             _safe_report(progress_callback, "done", None, None)
-            
+
             # Update conversation history
             self.conversation_manager.add_interaction(self.role, query, response, relevant_docs)
-            
+
             # Update statistics
             response_time = (datetime.now() - start_time).total_seconds()
             llm_error = getattr(self.llm_interface, "last_error", "")
@@ -375,11 +386,11 @@ class FinalRAGChatbot:
                 self._update_stats(response_time, False)
             else:
                 self._update_stats(response_time, True)
-            
+
             logger.info(f"Query processed successfully in {response_time:.2f}s")
-            
+
             return response
-            
+
         except Exception as e:
             self.last_error = str(e)
             logger.error(f"Error processing query: {e}")
@@ -438,22 +449,130 @@ class FinalRAGChatbot:
             logger.error(f"Error generating response: {e}")
             raise
 
-    def _generate_streaming_response(self, query: str, relevant_docs: List[Dict], context: List[Dict]) -> Dict:
-        """Generate a streaming response."""
-        # For now, return regular response with streaming metadata
-        # In production, this would implement actual streaming
-        response = self._generate_response(query, relevant_docs, context)
-        
-        return {
-            "type": "streaming",
-            "content": response,
-            "sources": relevant_docs if self.config["system"]["enable_source_attribution"] else [],
-            "metadata": {
-                "role": self.role,
-                "timestamp": datetime.now().isoformat(),
-                "document_count": len(relevant_docs)
-            }
-        }
+    def _generate_streaming_response(
+        self,
+        query: str,
+        relevant_docs: List[Dict],
+        context: List[Dict],
+        start_time: datetime,
+        progress_callback: Optional[ProgressCallback] = None,
+    ) -> Iterator[str]:
+        """Stream the LLM answer token-by-token, then append the source block.
+
+        The generator yields plain string deltas so callers can pass it
+        directly to ``st.write_stream``. After the LLM stream ends we yield
+        the markdown source block (when enabled) and record the interaction
+        in conversation history. ``<think>`` blocks are buffered and stripped
+        from what reaches the consumer.
+        """
+        document_content = "\n\n".join(doc["content"] for doc in relevant_docs)
+        conversation_history = "\n".join(
+            f"Q: {item['query']}\nA: {self._strip_source_attribution(item['response'])}"
+            for item in context[-3:]
+        )
+        role_config = self.config["roles"].get(self.role, self.config["roles"]["User"])
+        system_prompt = self._create_system_prompt(role_config)
+
+        accumulated = ""
+        think_buffer = ""
+        in_think_block = False
+        attribution_enabled = self.config["system"]["enable_source_attribution"]
+
+        try:
+            for chunk in self.llm_interface.generate_response(
+                query=query,
+                context=document_content,
+                conversation_history=conversation_history,
+                system_prompt=system_prompt,
+                stream=True,
+            ):
+                delta = chunk.get("content", "")
+                if not delta:
+                    continue
+
+                # Strip <think>...</think> blocks while preserving streaming.
+                visible, think_buffer, in_think_block = self._filter_think_stream(
+                    delta, think_buffer, in_think_block
+                )
+                if visible:
+                    accumulated += visible
+                    yield visible
+
+            llm_error = getattr(self.llm_interface, "last_error", "")
+            if not llm_error and attribution_enabled:
+                # Strip any trailing sources block the model produced before
+                # appending our own.
+                cleaned = self._strip_source_attribution(accumulated)
+                if cleaned != accumulated:
+                    accumulated = cleaned
+                sources = self._format_sources(relevant_docs)
+                if sources:
+                    source_block = f"\n\n---\n\n**Sources**\n{sources}"
+                    accumulated += source_block
+                    yield source_block
+
+            final_text = sanitize_output(accumulated)
+
+            self.conversation_manager.add_interaction(
+                self.role, query, final_text, relevant_docs
+            )
+
+            response_time = (datetime.now() - start_time).total_seconds()
+            if llm_error:
+                self.last_error = llm_error
+                self.stats["errors"] += 1
+                self._update_stats(response_time, False)
+            else:
+                self._update_stats(response_time, True)
+
+            logger.info(f"Streaming query processed in {response_time:.2f}s")
+        finally:
+            _safe_report(progress_callback, "done", None, None)
+
+    @staticmethod
+    def _filter_think_stream(
+        delta: str, buffer: str, in_think_block: bool
+    ) -> tuple:
+        """Strip ``<think>...</think>`` spans from a streaming delta.
+
+        Returns ``(visible, new_buffer, new_in_think)``. The buffer holds a
+        partial tag fragment that may be completed by a later delta.
+        """
+        text = buffer + delta
+        visible_parts = []
+        i = 0
+        while i < len(text):
+            if in_think_block:
+                close_idx = text.lower().find("</think>", i)
+                if close_idx == -1:
+                    # Still inside the think block; nothing more is visible.
+                    return ("".join(visible_parts), "", True)
+                i = close_idx + len("</think>")
+                in_think_block = False
+                continue
+
+            open_idx = text.lower().find("<think>", i)
+            if open_idx == -1:
+                # No more think tags; emit the rest but hold back any partial
+                # tag fragment at the tail so a split tag isn't shown.
+                tail = text[i:]
+                tail_buffer = ""
+                # Hold back the last few chars if they could start a tag.
+                for hold in range(min(7, len(tail)), 0, -1):
+                    if "<think>".startswith(tail[-hold:].lower()):
+                        tail_buffer = tail[-hold:]
+                        tail = tail[:-hold]
+                        break
+                if tail:
+                    visible_parts.append(tail)
+                return ("".join(visible_parts), tail_buffer, False)
+
+            if open_idx > i:
+                visible_parts.append(text[i:open_idx])
+            i = open_idx + len("<think>")
+            in_think_block = True
+
+        return ("".join(visible_parts), "", in_think_block)
 
     def _create_system_prompt(self, role_config: Dict) -> str:
         """Create system prompt based on role configuration."""

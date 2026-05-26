@@ -57,7 +57,7 @@ A Retrieval-Augmented Generation (RAG) chatbot that runs locally against an Olla
 Similarity uses cosine similarity from scikit-learn over a stacked NumPy matrix. Retrieval oversamples a wider candidate pool (`retrieval.max_results * retrieval.rerank_oversample_factor`), feeds it through `rerank_results`, and trims to `retrieval.max_results`. The manager also exposes add / retrieve / update / remove / search-by-metadata and pickle import/export.
 
 ### `src/core/llm_interface.py`
-`LLMInterface` supports `ollama` (POST `/api/chat`) and `local` / chat-completion compatible providers via the optional `openai` Python package. It also exposes helpers used by the broader system: `check_relevance`, `summarize_text`, `extract_keywords`, `classify_query`, `generate_questions`, `evaluate_answer`, and `is_available` health probe.
+`LLMInterface` supports `ollama` (POST `/api/chat`) and `local` / chat-completion compatible providers via the optional `openai` Python package. It streams Ollama responses (NDJSON token deltas) when `generate_response(stream=True)` is requested or `system.enable_streaming` is on; non-Ollama providers fall back to a single-chunk pseudo-stream. The class also exposes helpers used by the broader system: `check_relevance`, `summarize_text`, `extract_keywords`, `classify_query`, `generate_questions`, `evaluate_answer`, and `is_available` health probe.
 
 ### `src/core/query_analyzer.py`
 Lightweight, regex-driven analysis: intent classification (`question`, `tutorial`, `definition`, `comparison`, `troubleshooting`, `command`, `request`), entity extraction, query type, query enhancement, synonym expansion, simple filter extraction, and safety/length validation.

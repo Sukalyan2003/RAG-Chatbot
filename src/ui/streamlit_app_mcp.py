@@ -31,6 +31,29 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
+def _load_config_safe() -> Dict[str, Any]:
+    """Read ``config/config.json`` once per call without raising."""
+    try:
+        with open("config/config.json", "r") as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
+
+
+def _streaming_enabled_in_config() -> bool:
+    """Return ``system.enable_streaming`` from ``config/config.json``.
+
+    Read on demand so a config edit takes effect on the next chat turn
+    without restarting Streamlit.
+    """
+    return bool(_load_config_safe().get("system", {}).get("enable_streaming", False))
+
+
+def _mcp_enabled_in_config() -> bool:
+    """Return ``mcp.enabled`` from ``config/config.json`` (default True)."""
+    return bool(_load_config_safe().get("mcp", {}).get("enabled", True))
+
+
 def init_session_state():
     """Initialize session state variables."""
     if "rag_system" not in st.session_state:
@@ -42,7 +65,7 @@ def init_session_state():
     if "current_role" not in st.session_state:
         st.session_state.current_role = "User"
     if "mcp_enabled" not in st.session_state:
-        st.session_state.mcp_enabled = True
+        st.session_state.mcp_enabled = _mcp_enabled_in_config()
     if "system_stats" not in st.session_state:
         st.session_state.system_stats = {}
 
@@ -462,25 +485,79 @@ def main_interface():
         with st.chat_message("user"):
             st.write(prompt)
         
-        # Generate response — real MCP progress notifications drive the status
+        # Generate response — real MCP progress notifications drive the status.
+        # The status panel sits above the answer; the answer (streamed or
+        # one-shot) is rendered as its own block in the chat bubble so it
+        # never gets nested inside a collapsing status.
         with st.chat_message("assistant"):
             import time as _time
             start = _time.time()
-            with st.status("🤖 Thinking…", expanded=True) as chat_status:
-                response = None
-                last_stage = ""
+            chat_status = st.status("🤖 Thinking…", expanded=True)
+            response = None
+            last_stage = ""
 
-                def on_progress(stage, current, total):
-                    nonlocal last_stage
-                    label = CHAT_STAGE_LABELS.get(stage, stage or "Working")
-                    if stage == "retrieving" and current is not None:
-                        label = f"{label} ({current}/{total or '?'} chunks)"
-                    if stage != last_stage:
-                        chat_status.write(label)
-                        last_stage = stage
-                    elapsed = _time.time() - start
-                    chat_status.update(label=f"{label} · {elapsed:.1f}s")
+            def on_progress(stage, current, total):
+                nonlocal last_stage
+                label = CHAT_STAGE_LABELS.get(stage, stage or "Working")
+                if stage == "retrieving" and current is not None:
+                    label = f"{label} ({current}/{total or '?'} chunks)"
+                if stage != last_stage:
+                    chat_status.write(label)
+                    last_stage = stage
+                elapsed = _time.time() - start
+                chat_status.update(label=f"{label} · {elapsed:.1f}s")
 
+            use_stream = (
+                _streaming_enabled_in_config()
+                and not st.session_state.mcp_enabled
+            )
+
+            if use_stream:
+                # Direct-import path: stream tokens straight into the chat
+                # bubble (below the status block, not inside it).
+                rag_system = run_async(get_rag_system())
+                streamed_text = st.write_stream(
+                    rag_system.chat_stream(prompt, on_progress)
+                )
+                response_time = _time.time() - start
+                chat_status.update(
+                    label=f"✅ Answer ready · {response_time:.1f}s",
+                    state="complete",
+                )
+
+                # After the stream finishes, fetch the retrieved chunks and
+                # query analysis so Response Details mirrors the non-stream
+                # path. Failures here are non-fatal; we still show the
+                # answer.
+                metadata = {
+                    "role": st.session_state.current_role,
+                    "mcp_enabled": st.session_state.mcp_enabled,
+                    "streamed": True,
+                }
+                try:
+                    async def _collect_meta():
+                        analysis = await rag_system.analyze_query(prompt)
+                        chunks = await rag_system.search_documents(prompt, max_results=3)
+                        return analysis, chunks
+
+                    query_analysis, search_results = run_async(_collect_meta())
+                    metadata.update(
+                        {
+                            "query_analysis": query_analysis,
+                            "search_results_count": len(search_results),
+                            "retrieved_chunks": search_results,
+                        }
+                    )
+                except Exception as meta_exc:
+                    metadata["metadata_error"] = str(meta_exc)
+
+                response = {
+                    "role": "assistant",
+                    "content": streamed_text,
+                    "timestamp": datetime.now().isoformat(),
+                    "metadata": metadata,
+                }
+            else:
                 async def run_with_progress():
                     nonlocal response
                     response = await generate_response(prompt, on_progress)
@@ -491,8 +568,7 @@ def main_interface():
                     label=f"✅ Answer ready · {response_time:.1f}s",
                     state="complete",
                 )
-
-            st.markdown(response["content"])
+                st.markdown(response["content"])
 
             # Show metadata if available, with retrieved chunks surfaced inline
             if response.get("metadata"):

@@ -30,13 +30,13 @@
         "log_level": "INFO",
         "max_conversation_history": 10,
         "enable_source_attribution": true,
-        "enable_streaming": false,
+        "enable_streaming": true,
         "cache_embeddings": true,
         "cache_schema_version": 1,
         "conversation_timeout": 1800
     },
     "mcp": {
-        "enabled": true,
+        "enabled": false,
         "server_timeout": 30,
         "protocol_version": "2024-11-05",
         "stdio_buffer_size": 8192,
