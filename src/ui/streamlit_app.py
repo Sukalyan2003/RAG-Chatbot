@@ -48,24 +48,28 @@ st.markdown("""
         -webkit-text-fill-color: transparent;
     }
     
+    /* Cards have a fixed light background, so pin a dark foreground too —
+       otherwise dark themes render light-on-light and the text disappears. */
     .status-card {
         background-color: #f0f2f6;
+        color: #1a1a1a;
         padding: 1rem;
         border-radius: 10px;
         margin: 0.5rem 0;
         border-left: 4px solid #1e88e5;
     }
-    
+    .status-card h4, .status-card p { color: #1a1a1a; margin: 0.25rem 0; }
+
     .success-card {
         background-color: #e8f5e8;
         border-left-color: #4caf50;
     }
-    
+
     .warning-card {
         background-color: #fff3e0;
         border-left-color: #ff9800;
     }
-    
+
     .error-card {
         background-color: #ffebee;
         border-left-color: #f44336;
@@ -75,21 +79,22 @@ st.markdown("""
         padding: 1rem;
         margin: 0.5rem 0;
         border-radius: 10px;
+        color: #1a1a1a;
     }
-    
+
     .user-message {
         background-color: #e3f2fd;
         margin-left: 2rem;
     }
-    
+
     .bot-message {
         background-color: #f3e5f5;
         margin-right: 2rem;
     }
-    
+
     .source-attribution {
         font-size: 0.8rem;
-        color: #666;
+        color: #555;
         font-style: italic;
         margin-top: 0.5rem;
     }
@@ -149,82 +154,124 @@ class StreamlitRAGApp:
             return {}
     
     def run_initial_tests(self):
-        """Run system tests on application startup."""
+        """Run a fast smoke check at startup.
+
+        Earlier versions ran the full ``run_comprehensive_tests`` here,
+        which both eagerly imported ``sentence_transformers`` (pulling in
+        torch/torchvision) and instantiated a full ``FinalRAGChatbot`` —
+        loading the embeddings cache before the first frame rendered. We
+        now defer both to the System Tests page and use ``find_spec`` so
+        startup is bounded by config parsing, not model loading.
+        """
         if not st.session_state.get('tests_completed', False):
-            with st.spinner("Running initial system tests..."):
-                st.session_state.test_results = self.run_comprehensive_tests()
+            with st.spinner("Running startup checks…"):
+                st.session_state.test_results = self.run_startup_tests()
                 st.session_state.tests_completed = True
-    
-    def run_comprehensive_tests(self) -> Dict:
-        """Run comprehensive system tests."""
-        test_results = {
+
+    def run_startup_tests(self) -> Dict:
+        """Fast checks suitable for app boot: imports + config + deps presence."""
+        import importlib.util
+
+        test_results: Dict[str, Dict[str, str]] = {
             'import_test': {'status': 'running', 'details': ''},
             'config_test': {'status': 'running', 'details': ''},
             'dependencies_test': {'status': 'running', 'details': ''},
-            'basic_init_test': {'status': 'running', 'details': ''},
             'overall_status': 'running'
         }
-        
-        # Test 1: Import Tests
+
+        # Imports: the local modules are cheap to import (no torch chain).
         try:
-            from core.final_rag_system import FinalRAGChatbot
-            from core.document_processor import DocumentProcessor
-            from core.embedding_manager import EmbeddingManager
-            from core.llm_interface import LLMInterface
-            from core.query_analyzer import QueryAnalyzer
-            from core.conversation_manager import ConversationManager
-            from core.utils import setup_logging, validate_input
-            
+            from core.final_rag_system import FinalRAGChatbot  # noqa: F401
+            from core.document_processor import DocumentProcessor  # noqa: F401
+            from core.embedding_manager import EmbeddingManager  # noqa: F401
+            from core.llm_interface import LLMInterface  # noqa: F401
+            from core.query_analyzer import QueryAnalyzer  # noqa: F401
+            from core.conversation_manager import ConversationManager  # noqa: F401
+            from core.utils import setup_logging, validate_input  # noqa: F401
             test_results['import_test'] = {
                 'status': 'passed',
-                'details': 'All modules imported successfully'
+                'details': 'Core modules imported',
             }
         except Exception as e:
             test_results['import_test'] = {
                 'status': 'failed',
-                'details': f'Import error: {str(e)}'
+                'details': f'Import error: {e}',
             }
-        
-        # Test 2: Configuration Test
+
+        # Config: parse + required sections.
         try:
             config = self.load_config()
-            required_sections = ['system', 'embeddings', 'llm', 'retrieval', 'roles', 'paths']
-            missing = [s for s in required_sections if s not in config]
-            
+            required = ['system', 'embedding', 'llm', 'retrieval', 'roles', 'paths']
+            missing = [s for s in required if s not in config]
             if missing:
                 test_results['config_test'] = {
                     'status': 'failed',
-                    'details': f'Missing config sections: {missing}'
+                    'details': f'Missing config sections: {missing}',
                 }
             else:
                 test_results['config_test'] = {
                     'status': 'passed',
-                    'details': 'Configuration file is valid'
+                    'details': 'Configuration file is valid',
                 }
         except Exception as e:
             test_results['config_test'] = {
                 'status': 'failed',
-                'details': f'Config error: {str(e)}'
+                'details': f'Config error: {e}',
             }
-        
-        # Test 3: Dependencies Test
-        try:
-            import sentence_transformers
-            import sklearn
-            import numpy
-            import pandas
-            
-            test_results['dependencies_test'] = {
-                'status': 'passed',
-                'details': 'All dependencies available'
-            }
-        except ImportError as e:
+
+        # Dependencies: presence-only check, so we don't drag in torchvision.
+        # sentence_transformers is treated as optional — only required when
+        # the configured embedding provider asks for it.
+        required_deps = ['sklearn', 'numpy', 'pandas', 'requests']
+        missing_deps = [m for m in required_deps if importlib.util.find_spec(m) is None]
+        optional_missing = []
+        if config.get('embedding', {}).get('provider') == 'sentence_transformers':
+            if importlib.util.find_spec('sentence_transformers') is None:
+                missing_deps.append('sentence_transformers')
+        elif importlib.util.find_spec('sentence_transformers') is None:
+            optional_missing.append('sentence_transformers')
+
+        if missing_deps:
             test_results['dependencies_test'] = {
                 'status': 'failed',
-                'details': f'Missing dependency: {str(e)}'
+                'details': f'Missing required deps: {missing_deps}',
             }
-        
-        # Test 4: Basic Initialization Test
+        else:
+            note = (
+                f' (optional missing: {optional_missing})' if optional_missing else ''
+            )
+            test_results['dependencies_test'] = {
+                'status': 'passed',
+                'details': f'All required dependencies present{note}',
+            }
+
+        # Mark the system as initialized iff the cheap checks pass; the
+        # actual engine instantiation happens lazily when the chat page
+        # opens.
+        if (
+            test_results['import_test']['status'] == 'passed'
+            and test_results['config_test']['status'] == 'passed'
+        ):
+            st.session_state.system_initialized = True
+
+        statuses = [v['status'] for k, v in test_results.items() if k != 'overall_status']
+        if all(s == 'passed' for s in statuses):
+            test_results['overall_status'] = 'passed'
+        elif any(s == 'failed' for s in statuses):
+            test_results['overall_status'] = 'failed'
+        else:
+            test_results['overall_status'] = 'partial'
+        return test_results
+
+    def run_comprehensive_tests(self) -> Dict:
+        """Full test set including a real ``FinalRAGChatbot`` boot.
+
+        Kept for the System Tests page so users can run the heavier
+        validation on demand without paying the cost at every page load.
+        """
+        test_results = self.run_startup_tests()
+        test_results['basic_init_test'] = {'status': 'running', 'details': ''}
+
         try:
             if test_results['import_test']['status'] == 'passed':
                 from core.final_rag_system import FinalRAGChatbot
@@ -232,34 +279,32 @@ class StreamlitRAGApp:
                 if chatbot.initialized:
                     test_results['basic_init_test'] = {
                         'status': 'passed',
-                        'details': 'System initializes successfully'
+                        'details': 'System initializes successfully',
                     }
                     st.session_state.system_initialized = True
                 else:
                     test_results['basic_init_test'] = {
                         'status': 'failed',
-                        'details': 'System failed to initialize'
+                        'details': 'System failed to initialize',
                     }
             else:
                 test_results['basic_init_test'] = {
                     'status': 'skipped',
-                    'details': 'Skipped due to import failures'
+                    'details': 'Skipped due to import failures',
                 }
         except Exception as e:
             test_results['basic_init_test'] = {
                 'status': 'failed',
-                'details': f'Initialization error: {str(e)}'
+                'details': f'Initialization error: {e}',
             }
-        
-        # Overall status
-        all_tests = [test_results[key]['status'] for key in test_results if key != 'overall_status']
-        if all(status == 'passed' for status in all_tests):
+
+        statuses = [v['status'] for k, v in test_results.items() if k != 'overall_status']
+        if all(s == 'passed' for s in statuses):
             test_results['overall_status'] = 'passed'
-        elif any(status == 'failed' for status in all_tests):
+        elif any(s == 'failed' for s in statuses):
             test_results['overall_status'] = 'failed'
         else:
             test_results['overall_status'] = 'partial'
-        
         return test_results
     
     def render_header(self):
@@ -334,236 +379,229 @@ class StreamlitRAGApp:
     def render_dashboard(self):
         """Render the main dashboard page."""
         st.header("🏠 System Dashboard")
-        
-        # System overview cards
-        col1, col2, col3, col4 = st.columns(4)
-        
-        with col1:
-            st.markdown(f"""
-            <div class="status-card {'success-card' if st.session_state.system_initialized else 'error-card'}">
-                <h4>System Status</h4>
-                <p>{'✅ Operational' if st.session_state.system_initialized else '❌ Issues'}</p>
-            </div>
-            """, unsafe_allow_html=True)
-        
-        with col2:
-            doc_count = len(st.session_state.loaded_documents)
-            st.markdown(f"""
-            <div class="status-card">
-                <h4>Documents</h4>
-                <p>📚 {doc_count} loaded</p>
-            </div>
-            """, unsafe_allow_html=True)
-        
-        with col3:
-            chat_count = len(st.session_state.chat_history)
-            st.markdown(f"""
-            <div class="status-card">
-                <h4>Conversations</h4>
-                <p>💬 {chat_count} messages</p>
-            </div>
-            """, unsafe_allow_html=True)
-        
-        with col4:
-            role = st.session_state.current_role
-            st.markdown(f"""
-            <div class="status-card">
-                <h4>Current Role</h4>
-                <p>👤 {role}</p>
-            </div>
-            """, unsafe_allow_html=True)
-        
+
+        # System overview — use native metrics for a clean look that adapts
+        # to dark mode automatically.
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric(
+            "System Status",
+            "✅ Operational" if st.session_state.system_initialized else "❌ Issues",
+        )
+        c2.metric("Documents", f"📚 {len(st.session_state.loaded_documents)}")
+        c3.metric("Conversation", f"💬 {len(st.session_state.chat_history)} msgs")
+        c4.metric("Current Role", f"👤 {st.session_state.current_role}")
+
+        st.divider()
+
         # Test results summary
         st.subheader("🧪 System Test Results")
         test_results = st.session_state.test_results
-        
+
         for test_name, result in test_results.items():
             if test_name == 'overall_status':
                 continue
-                
             status_icon = {
                 'passed': '✅',
                 'failed': '❌',
                 'running': '🔄',
-                'skipped': '⏭️'
+                'skipped': '⏭️',
             }.get(result['status'], '❓')
-            
             with st.expander(f"{status_icon} {test_name.replace('_', ' ').title()}"):
                 st.write(f"**Status:** {result['status']}")
                 st.write(f"**Details:** {result['details']}")
-        
+
+        st.divider()
+
         # Quick actions
         st.subheader("🚀 Quick Actions")
         col1, col2, col3 = st.columns(3)
-        
         with col1:
             if st.button("🔄 Re-run Tests", width="stretch"):
-                with st.spinner("Running tests..."):
+                with st.spinner("Running full tests…"):
                     st.session_state.test_results = self.run_comprehensive_tests()
-                    st.rerun()
-        
+                st.rerun()
         with col2:
             if st.button("💬 Start Chat", width="stretch"):
                 st.session_state.current_page = "Chat Interface"
                 st.rerun()
-        
         with col3:
             if st.button("📚 Load Documents", width="stretch"):
                 st.session_state.current_page = "Document Management"
                 st.rerun()
     
-    def render_chat_interface(self):
-        """Render the chat interface page."""
-        st.header("💬 Chat Interface")
-        
-        # Initialize chatbot if needed
-        if not st.session_state.chatbot_instance or not st.session_state.system_initialized:
-            try:
+    def _ensure_chatbot(self) -> bool:
+        """Lazy-load ``FinalRAGChatbot`` with a visible spinner.
+
+        Embedding-cache load is the slow part on first open; a spinner
+        makes that obvious instead of letting the page freeze silently.
+        """
+        if (
+            st.session_state.chatbot_instance is not None
+            and st.session_state.system_initialized
+        ):
+            return True
+        try:
+            with st.spinner("Loading RAG engine — first open reads the embeddings cache…"):
                 from core.final_rag_system import FinalRAGChatbot
-                st.session_state.chatbot_instance = FinalRAGChatbot(role=st.session_state.current_role)
-                st.success(f"✅ Chatbot initialized for role: {st.session_state.current_role}")
-            except Exception as e:
-                st.error(f"❌ Failed to initialize chatbot: {e}")
-                return
-        
-        # Chat controls
-        col1, col2, col3 = st.columns([2, 1, 1])
-        with col1:
-            st.info(f"👤 Chatting as: **{st.session_state.current_role}**")
-        with col2:
-            if st.button("🗑️ Clear History"):
+                st.session_state.chatbot_instance = FinalRAGChatbot(
+                    role=st.session_state.current_role
+                )
+                st.session_state.system_initialized = True
+            return True
+        except Exception as e:
+            st.error(f"❌ Failed to initialize chatbot: {e}")
+            return False
+
+    def render_chat_interface(self):
+        """Render the chat interface page using Streamlit-native widgets."""
+        st.header("💬 Chat Interface")
+
+        if not self._ensure_chatbot():
+            return
+
+        chatbot = st.session_state.chatbot_instance
+
+        # Top metrics row — same shape as the MCP UI.
+        stats = chatbot.get_stats() if chatbot else {}
+        total = stats.get("queries_processed", 0)
+        successful = stats.get("successful_responses", 0)
+        success_rate = (successful / total * 100) if total else 0.0
+        avg_time = stats.get("average_response_time", 0)
+
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Queries", total)
+        c2.metric("Avg Response", f"{avg_time:.2f}s" if avg_time else "N/A")
+        c3.metric("Success Rate", f"{success_rate:.1f}%")
+        c4.metric("Errors", stats.get("errors", 0))
+
+        with st.expander("📊 Full stats (JSON)"):
+            st.json(stats)
+
+        # Controls row.
+        ctrl1, ctrl2, ctrl3 = st.columns([3, 1, 1])
+        with ctrl1:
+            st.caption(
+                f"👤 **{st.session_state.current_role}** · "
+                f"streaming controlled by `system.enable_streaming` in config"
+            )
+        with ctrl2:
+            stream_mode = st.toggle(
+                "🔄 Stream",
+                value=st.session_state.config.get("system", {}).get(
+                    "enable_streaming", False
+                ),
+                help="Render tokens progressively as the model generates them.",
+            )
+        with ctrl3:
+            if st.button("🗑️ Clear", width="stretch"):
                 st.session_state.chat_history = []
-                if st.session_state.chatbot_instance:
-                    st.session_state.chatbot_instance.clear_conversation()
+                if chatbot:
+                    chatbot.clear_conversation()
                 st.rerun()
-        with col3:
-            if st.button("📊 Get Stats"):
-                if st.session_state.chatbot_instance:
-                    stats = st.session_state.chatbot_instance.get_stats()
-                    st.json(stats)
-        
-        # Display chat history
-        st.subheader("📝 Conversation History")
-        chat_container = st.container()
-        
-        with chat_container:
-            for i, message in enumerate(st.session_state.chat_history):
-                if message['type'] == 'user':
-                    st.markdown(f"""
-                    <div class="chat-message user-message">
-                        <strong>👤 You:</strong><br>
-                        {message['content']}
-                    </div>
-                    """, unsafe_allow_html=True)
-                else:
-                    response_content = message['content']
-                    sources = message.get('sources', [])
-                    
-                    st.markdown(f"""
-                    <div class="chat-message bot-message">
-                        <strong>🤖 Assistant:</strong><br>
-                        {response_content}
-                    </div>
-                    """, unsafe_allow_html=True)
-                    
-                    if sources:
-                        st.markdown(f"""
-                        <div class="source-attribution">
-                            📚 Sources: {', '.join(sources[:3])}
-                        </div>
-                        """, unsafe_allow_html=True)
-        
-        # Chat input
-        st.subheader("✏️ Send Message")
-        
-        # Message input
-        user_input = st.text_area(
-            "Your message:",
-            height=100,
-            placeholder="Ask me anything about your documents..."
+
+        st.divider()
+
+        # Display chat history with native chat bubbles.
+        for message in st.session_state.chat_history:
+            role = "user" if message["type"] == "user" else "assistant"
+            with st.chat_message(role):
+                st.markdown(message["content"])
+                sources = message.get("sources") or []
+                if sources:
+                    st.caption(f"📚 Sources: {', '.join(sources[:3])}")
+
+        # Chat input — single-line, submit on Enter, fixed to the bottom.
+        if user_input := st.chat_input("Ask me anything about your documents…"):
+            self._handle_chat_turn(user_input, stream_mode)
+
+    def _handle_chat_turn(self, user_input: str, stream_mode: bool) -> None:
+        """Run one chat turn with status + optional streaming render."""
+        chatbot = st.session_state.chatbot_instance
+        if chatbot is None:
+            st.error("❌ Chatbot not initialized. Please check system status.")
+            return
+
+        # Echo the user's message immediately and persist it.
+        st.session_state.chat_history.append(
+            {"type": "user", "content": user_input, "timestamp": datetime.now()}
         )
-        
-        col1, col2 = st.columns([3, 1])
-        with col1:
-            send_button = st.button("📤 Send Message", width="stretch")
-        with col2:
-            stream_mode = st.checkbox("🔄 Streaming", value=False)
-        
-        # Process message
-        if send_button and user_input.strip():
-            if not st.session_state.chatbot_instance:
-                st.error("❌ Chatbot not initialized. Please check system status.")
-                return
-            
-            # Add user message to history
-            st.session_state.chat_history.append({
-                'type': 'user',
-                'content': user_input,
-                'timestamp': datetime.now()
-            })
-            
-            # Generate response — staged status with per-phase feedback
-            stage_labels = {
-                "validating": "🔒 Validating input",
-                "analyzing": "🧠 Analyzing query",
-                "retrieving": "📚 Retrieving relevant context",
-                "context": "🧵 Loading conversation context",
-                "generating": "✍️ Generating answer",
-                "done": "✅ Done",
-            }
-            start_time = time.time()
+        with st.chat_message("user"):
+            st.markdown(user_input)
+
+        stage_labels = {
+            "validating": "🔒 Validating input",
+            "analyzing": "🧠 Analyzing query",
+            "retrieving": "📚 Retrieving relevant context",
+            "context": "🧵 Loading conversation context",
+            "generating": "✍️ Generating answer",
+            "done": "✅ Done",
+        }
+        start_time = time.time()
+
+        with st.chat_message("assistant"):
+            chat_status = st.status("🤖 Thinking…", expanded=True)
+            last_stage = ""
+
+            def on_progress(stage, current, total):
+                nonlocal last_stage
+                label = stage_labels.get(stage, stage or "Working")
+                if stage == "retrieving" and current is not None:
+                    label = f"{label} ({current}/{total or '?'} chunks)"
+                if stage != last_stage:
+                    chat_status.write(label)
+                    last_stage = stage
+                elapsed = time.time() - start_time
+                chat_status.update(label=f"{label} · {elapsed:.1f}s")
+
             try:
-                with st.status("🤖 Thinking…", expanded=True) as chat_status:
-                    def on_progress(stage, current, total):
-                        elapsed = time.time() - start_time
-                        label = stage_labels.get(stage, stage)
-                        if stage == "retrieving" and current is not None:
-                            label = f"{label} ({current}/{total or '?'} chunks)"
-                        chat_status.update(label=f"{label} · {elapsed:.1f}s")
-                        chat_status.write(label)
+                response = chatbot.chat(
+                    user_input, stream=stream_mode, progress_callback=on_progress
+                )
 
-                    response = st.session_state.chatbot_instance.chat(
-                        user_input,
-                        stream=stream_mode,
-                        progress_callback=on_progress,
-                    )
-                    response_time = time.time() - start_time
-                    chat_status.update(label=f"✅ Answer ready · {response_time:.1f}s", state="complete")
-
-                # Handle different response types
-                if isinstance(response, dict):
-                    response_content = response.get('content', str(response))
-                    sources = response.get('sources', [])
+                if stream_mode and not isinstance(response, str):
+                    response_content = st.write_stream(response)
+                    sources = []
+                elif isinstance(response, dict):
+                    response_content = response.get("content", str(response))
+                    sources = response.get("sources", [])
                 else:
                     response_content = str(response)
                     sources = []
+                    st.markdown(response_content)
 
-                # Add bot response to history
-                st.session_state.chat_history.append({
-                    'type': 'bot',
-                    'content': response_content,
-                    'sources': sources,
-                    'response_time': response_time,
-                    'timestamp': datetime.now()
-                })
+                response_time = time.time() - start_time
+                chat_status.update(
+                    label=f"✅ Answer ready · {response_time:.1f}s",
+                    state="complete",
+                )
 
-                # Update performance data
-                st.session_state.performance_data.append({
-                    'timestamp': datetime.now(),
-                    'response_time': response_time,
-                    'role': st.session_state.current_role,
-                    'query_length': len(user_input)
-                })
-
-                st.rerun()
-
+                st.session_state.chat_history.append(
+                    {
+                        "type": "bot",
+                        "content": response_content,
+                        "sources": sources,
+                        "response_time": response_time,
+                        "timestamp": datetime.now(),
+                    }
+                )
+                st.session_state.performance_data.append(
+                    {
+                        "timestamp": datetime.now(),
+                        "response_time": response_time,
+                        "role": st.session_state.current_role,
+                        "query_length": len(user_input),
+                    }
+                )
             except Exception as e:
+                chat_status.update(label=f"❌ Error: {e}", state="error")
                 st.error(f"❌ Error generating response: {e}")
-                st.session_state.chat_history.append({
-                    'type': 'bot',
-                    'content': f"I apologize, but I encountered an error: {str(e)}",
-                    'timestamp': datetime.now()
-                })
+                st.session_state.chat_history.append(
+                    {
+                        "type": "bot",
+                        "content": f"I apologize, but I encountered an error: {e}",
+                        "timestamp": datetime.now(),
+                    }
+                )
     
     def render_document_management(self):
         """Render the document management page."""
