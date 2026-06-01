@@ -545,6 +545,139 @@ class SystemTests(unittest.TestCase):
         # interleaved with them.
         self.assertLess(text.index("Artificial intelligence."), text.index("**Sources**"))
 
+    def test_ollama_embed_one_post_per_batch(self):
+        install_fake_numeric_modules()
+        from core.embedding_manager import EmbeddingManager
+
+        config = copy.deepcopy(self.config)
+        config["embedding"]["provider"] = "ollama"
+        config["embedding"]["batch_size"] = 32
+
+        # 64 chunks → expect exactly 2 POSTs to /api/embed (one per batch).
+        docs = [
+            {"content": f"chunk {i} discussing artificial intelligence",
+             "metadata": {"source": f"doc_{i}.txt"}}
+            for i in range(64)
+        ]
+
+        embed_call_count = {"n": 0, "batch_sizes": []}
+
+        def counting_post(url, json=None, timeout=None, **kwargs):
+            if url.endswith("/api/embed"):
+                embed_call_count["n"] += 1
+                embed_call_count["batch_sizes"].append(len((json or {}).get("input", [])))
+            return fake_ollama_post(url, json=json, timeout=timeout)
+
+        manager = EmbeddingManager(config)
+        with patch("requests.post", side_effect=counting_post):
+            self.assertTrue(manager.add_documents(docs))
+
+        self.assertEqual(2, embed_call_count["n"])
+        self.assertEqual([32, 32], embed_call_count["batch_sizes"])
+
+    def test_num_ctx_flows_into_ollama_options(self):
+        from core.llm_interface import LLMInterface
+
+        config = copy.deepcopy(self.config)
+        config["llm"]["provider"] = "ollama"
+        config["llm"]["num_ctx"] = 1234
+        # Confirm legacy context_window is ignored when num_ctx is set.
+        config["llm"]["context_window"] = 8192
+
+        captured = {}
+
+        def fake_post(url, json=None, timeout=None, **kwargs):
+            captured["payload"] = json
+            return FakeResponse({"message": {"content": "ok"}})
+
+        llm = LLMInterface(config)
+        with patch("requests.post", side_effect=fake_post):
+            llm.generate_response(query="hi")
+
+        self.assertEqual(1234, captured["payload"]["options"]["num_ctx"])
+
+    def test_num_ctx_falls_back_to_context_window(self):
+        from core.llm_interface import LLMInterface
+
+        config = copy.deepcopy(self.config)
+        config["llm"]["provider"] = "ollama"
+        config["llm"].pop("num_ctx", None)
+        config["llm"]["context_window"] = 4321
+
+        captured = {}
+
+        def fake_post(url, json=None, timeout=None, **kwargs):
+            captured["payload"] = json
+            return FakeResponse({"message": {"content": "ok"}})
+
+        llm = LLMInterface(config)
+        with patch("requests.post", side_effect=fake_post):
+            llm.generate_response(query="hi")
+
+        self.assertEqual(4321, captured["payload"]["options"]["num_ctx"])
+
+    def test_resolve_ollama_tuning_picks_tier_defaults(self):
+        from core.utils import resolve_ollama_tuning
+
+        # All values "auto" → fully derived from the (mocked) probe.
+        config = {
+            "system": {
+                "auto_tune": True,
+                "ollama_env": {
+                    "keep_alive": "auto",
+                    "kv_cache_type": "auto",
+                    "num_gpu": "auto",
+                },
+            },
+            "llm": {"num_ctx": "auto"},
+        }
+
+        # 4 GB-class card → tight tier defaults.
+        with patch("core.utils.detect_hardware", return_value={
+            "gpu_vram_gb": 4.0, "ram_gb": 16.0, "cpu_count": 8,
+        }):
+            tuning = resolve_ollama_tuning(config)
+        self.assertEqual("tight", tuning["tier"])
+        self.assertEqual(2048, tuning["num_ctx"])
+        self.assertEqual(
+            {"keep_alive": "24h", "kv_cache_type": "q8_0", "num_gpu": 999},
+            tuning["ollama_env"],
+        )
+
+        # No GPU → cpu tier defaults.
+        with patch("core.utils.detect_hardware", return_value={
+            "gpu_vram_gb": 0.0, "ram_gb": 16.0, "cpu_count": 8,
+        }):
+            tuning = resolve_ollama_tuning(config)
+        self.assertEqual("cpu", tuning["tier"])
+        self.assertEqual(0, tuning["ollama_env"]["num_gpu"])
+
+    def test_resolve_ollama_tuning_explicit_overrides_auto(self):
+        from core.utils import resolve_ollama_tuning
+
+        config = {
+            "system": {
+                "auto_tune": True,
+                "ollama_env": {
+                    "keep_alive": "auto",
+                    "kv_cache_type": "q4_0",   # explicit — must not be overridden
+                    "num_gpu": "auto",
+                },
+            },
+            "llm": {"num_ctx": 1024},           # explicit — must not be overridden
+        }
+
+        with patch("core.utils.detect_hardware", return_value={
+            "gpu_vram_gb": 4.0, "ram_gb": 16.0, "cpu_count": 8,
+        }):
+            tuning = resolve_ollama_tuning(config)
+
+        self.assertEqual(1024, tuning["num_ctx"])
+        self.assertEqual("q4_0", tuning["ollama_env"]["kv_cache_type"])
+        # The other two come from the tight-tier defaults.
+        self.assertEqual("24h", tuning["ollama_env"]["keep_alive"])
+        self.assertEqual(999, tuning["ollama_env"]["num_gpu"])
+
     def test_clear_documents_removes_persisted_cache(self):
         install_fake_numeric_modules()
         from core.final_rag_system import FinalRAGChatbot

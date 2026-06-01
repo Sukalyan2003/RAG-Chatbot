@@ -196,6 +196,23 @@ class LLMInterface:
             logger.error(f"Error calling LLM: {e}")
             raise
 
+    def _ollama_options(self) -> Dict[str, Any]:
+        """Build the Ollama ``options`` block.
+
+        ``llm.num_ctx`` is the canonical key; ``llm.context_window`` is
+        accepted as a deprecated alias. We default to 2048 — on a 4 GB GPU
+        prefill scales linearly with context length, so paying for context
+        we don't use is the most expensive thing the LLM does.
+        """
+        num_ctx = self.llm_config.get(
+            "num_ctx", self.llm_config.get("context_window", 2048)
+        )
+        return {
+            "temperature": self.llm_config.get("temperature", 0.7),
+            "num_predict": self.llm_config.get("max_tokens", 2000),
+            "num_ctx": num_ctx,
+        }
+
     def _call_ollama(self, messages: List[Dict]) -> str:
         """Call Ollama's native chat API."""
         response = requests.post(
@@ -204,11 +221,7 @@ class LLMInterface:
                 "model": self.llm_config["model"],
                 "messages": messages,
                 "stream": False,
-                "options": {
-                    "temperature": self.llm_config.get("temperature", 0.7),
-                    "num_predict": self.llm_config.get("max_tokens", 2000),
-                    "num_ctx": self.llm_config.get("context_window", 8192),
-                },
+                "options": self._ollama_options(),
             },
             timeout=self.llm_config.get("timeout", 30),
         )
@@ -234,11 +247,7 @@ class LLMInterface:
                 "model": self.llm_config["model"],
                 "messages": messages,
                 "stream": True,
-                "options": {
-                    "temperature": self.llm_config.get("temperature", 0.7),
-                    "num_predict": self.llm_config.get("max_tokens", 2000),
-                    "num_ctx": self.llm_config.get("context_window", 8192),
-                },
+                "options": self._ollama_options(),
             },
             timeout=self.llm_config.get("timeout", 30),
             stream=True,

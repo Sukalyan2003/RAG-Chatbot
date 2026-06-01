@@ -124,10 +124,10 @@ Prompts:
 
 `config/config.json` drives everything. Key sections:
 
-- `llm` — provider (`ollama` default), `base_url`, `model` (`qwen3:4b-instruct` by default), temperature, token/context limits, timeout.
-- `embedding` — provider (`ollama` default), `model` (`qwen3-embedding:0.6b` by default), batch size, max length, device, timeout.
-- `retrieval` — `similarity_threshold` (0.3), `max_results` (5), `chunk_size` (1000), `chunk_overlap` (200), `rerank_results`, `rerank_oversample_factor` (4).
-- `system` — log level, conversation history cap, source attribution, streaming, cache flag, session timeout.
+- `llm` — provider (`ollama` default), `base_url`, `model` (`qwen3:4b-instruct` by default), temperature, `max_tokens`, `num_ctx` (`"auto"` by default — auto-tuner picks 2048/4096/8192 based on detected VRAM), timeout. `context_window` is accepted as a deprecated alias for `num_ctx`.
+- `embedding` — provider (`ollama` default), `model` (`qwen3-embedding:0.6b` by default), batch size (POSTs one HTTP request per batch to `/api/embed`), max length, device, timeout.
+- `retrieval` — `similarity_threshold` (0.5), `max_results` (3 — the reranker means smaller K still wins), `chunk_size` (1000), `chunk_overlap` (200), `rerank_results`, `rerank_oversample_factor` (4).
+- `system` — log level, conversation history cap, source attribution, streaming, cache flag, session timeout, `auto_tune` (default `true`), and `ollama_env` block (`keep_alive`, `kv_cache_type`, `num_gpu` — each accepts `"auto"` to opt in to hardware-derived defaults). With `auto_tune=true`, the engine probes `nvidia-smi` for VRAM and picks tight (≤5 GB → q8_0 KV cache, num_ctx=2048), mid (≤9 GB → f16, num_ctx=4096), ample (>9 GB → f16, num_ctx=8192), or cpu (no GPU → num_gpu=0). Explicit config values always win.
 - `mcp` — `enabled`, server timeout, protocol version (`2024-11-05`), stdio buffer size, optional HTTP/WebSocket transport flags.
 - `roles` — per-role permissions, response length, access level, allowed MCP tools.
 - `paths` — `data_dir`, `documents_dir`, `embeddings_dir`, `logs_dir`, `cache_dir`.

@@ -506,6 +506,189 @@ def get_system_info() -> Dict[str, Any]:
         return {"error": str(e)}
 
 
+_OLLAMA_ENV_MAP = {
+    "keep_alive": "OLLAMA_KEEP_ALIVE",
+    "kv_cache_type": "OLLAMA_KV_CACHE_TYPE",
+    "num_gpu": "OLLAMA_NUM_GPU",
+}
+
+
+def _probe_gpu_vram_gb() -> float:
+    """Best-effort GPU VRAM probe.
+
+    Tries ``nvidia-smi`` first (no Python deps, fast). Returns 0.0 if the
+    binary isn't on PATH or no NVIDIA GPU is present. We deliberately do
+    not import ``torch`` here — pulling torch in for a hardware probe
+    would defeat the purpose on torch-less installs.
+    """
+    import subprocess
+    try:
+        out = subprocess.check_output(
+            [
+                "nvidia-smi",
+                "--query-gpu=memory.total",
+                "--format=csv,noheader,nounits",
+            ],
+            timeout=2,
+            stderr=subprocess.DEVNULL,
+        )
+        lines = out.decode().strip().splitlines()
+        if lines:
+            # Value is in MiB; convert to GB.
+            return float(lines[0].strip()) / 1024.0
+    except (subprocess.TimeoutExpired, FileNotFoundError, subprocess.CalledProcessError, ValueError):
+        pass
+    return 0.0
+
+
+def detect_hardware() -> Dict[str, Any]:
+    """Snapshot the host's hardware for tuning decisions."""
+    info: Dict[str, Any] = {
+        "gpu_vram_gb": _probe_gpu_vram_gb(),
+        "ram_gb": 0.0,
+        "cpu_count": os.cpu_count() or 0,
+    }
+    try:
+        import psutil  # local import — keeps utils.py import-cheap
+        info["ram_gb"] = psutil.virtual_memory().total / (1024 ** 3)
+    except ImportError:
+        pass
+    return info
+
+
+def _vram_tier(vram_gb: float) -> str:
+    """Bucket VRAM into qualitative tiers used by the auto-tuner."""
+    if vram_gb <= 0.0:
+        return "cpu"
+    if vram_gb < 5.0:
+        return "tight"  # 4 GB-class cards (e.g., GTX 1650)
+    if vram_gb < 9.0:
+        return "mid"    # 6-8 GB cards
+    return "ample"      # 12 GB+ cards
+
+
+def auto_tune_defaults(hardware: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """Pick reasonable Ollama settings given the detected hardware.
+
+    Returns a dict shaped like the ``system.ollama_env`` config block plus
+    a top-level ``num_ctx``. Callers merge user-supplied overrides over
+    the top so explicit config always wins.
+    """
+    hw = hardware or detect_hardware()
+    tier = _vram_tier(hw["gpu_vram_gb"])
+
+    if tier == "cpu":
+        return {
+            "num_ctx": 2048,
+            "ollama_env": {
+                "keep_alive": "10m",
+                "kv_cache_type": "f16",
+                "num_gpu": 0,
+            },
+        }
+    if tier == "tight":
+        # Aggressive VRAM diet — q8 KV cache, capped context, keep model loaded.
+        return {
+            "num_ctx": 2048,
+            "ollama_env": {
+                "keep_alive": "24h",
+                "kv_cache_type": "q8_0",
+                "num_gpu": 999,
+            },
+        }
+    if tier == "mid":
+        return {
+            "num_ctx": 4096,
+            "ollama_env": {
+                "keep_alive": "24h",
+                "kv_cache_type": "f16",
+                "num_gpu": 999,
+            },
+        }
+    # Ample VRAM
+    return {
+        "num_ctx": 8192,
+        "ollama_env": {
+            "keep_alive": "24h",
+            "kv_cache_type": "f16",
+            "num_gpu": 999,
+        },
+    }
+
+
+def _is_auto(value: Any) -> bool:
+    """Treat None and the literal string ``"auto"`` as "please auto-tune"."""
+    return value is None or (isinstance(value, str) and value.strip().lower() == "auto")
+
+
+def resolve_ollama_tuning(config: Dict[str, Any]) -> Dict[str, Any]:
+    """Merge config-provided values with hardware-derived defaults.
+
+    Rules:
+    - Missing keys (or ``"auto"``) get filled from ``auto_tune_defaults()``.
+    - Explicit user values win — auto-tune never overrides them.
+    - When ``system.auto_tune`` is ``false``, no detection runs; only
+      config-provided values are used.
+
+    Returns ``{"num_ctx": int, "ollama_env": {...}, "hardware": {...},
+    "auto_tune": bool, "tier": str}`` — the last three are for logging.
+    """
+    system_cfg = config.get("system") or {}
+    llm_cfg = config.get("llm") or {}
+    auto_tune = bool(system_cfg.get("auto_tune", True))
+
+    user_env = dict(system_cfg.get("ollama_env") or {})
+    user_num_ctx = llm_cfg.get("num_ctx")
+
+    hardware = detect_hardware() if auto_tune else {
+        "gpu_vram_gb": 0.0, "ram_gb": 0.0, "cpu_count": os.cpu_count() or 0
+    }
+
+    if auto_tune:
+        defaults = auto_tune_defaults(hardware)
+    else:
+        defaults = {"num_ctx": user_num_ctx or 2048, "ollama_env": {}}
+
+    # Start from auto-tuned defaults, layer user values on top (user wins).
+    resolved_env = {**defaults["ollama_env"]}
+    for key in _OLLAMA_ENV_MAP:
+        if key in user_env and not _is_auto(user_env[key]):
+            resolved_env[key] = user_env[key]
+
+    resolved_num_ctx = (
+        defaults["num_ctx"] if _is_auto(user_num_ctx) else user_num_ctx
+    )
+
+    return {
+        "num_ctx": int(resolved_num_ctx),
+        "ollama_env": resolved_env,
+        "hardware": hardware,
+        "auto_tune": auto_tune,
+        "tier": _vram_tier(hardware["gpu_vram_gb"]),
+    }
+
+
+def apply_ollama_env(ollama_env: Optional[Dict[str, Any]]) -> Dict[str, str]:
+    """Export Ollama tuning env vars unless the user already set them.
+
+    ``keep_alive`` → ``OLLAMA_KEEP_ALIVE``, ``kv_cache_type`` →
+    ``OLLAMA_KV_CACHE_TYPE``, ``num_gpu`` → ``OLLAMA_NUM_GPU``.
+    Returns the dict of variables that were actually set.
+    """
+    if not ollama_env:
+        return {}
+
+    exported: Dict[str, str] = {}
+    for key, env_name in _OLLAMA_ENV_MAP.items():
+        if key not in ollama_env or _is_auto(ollama_env[key]):
+            continue
+        if env_name in os.environ:
+            continue
+        os.environ[env_name] = str(ollama_env[key])
+        exported[env_name] = os.environ[env_name]
+    return exported
+
+
 class PerformanceMonitor:
     """Simple performance monitoring utility."""
     

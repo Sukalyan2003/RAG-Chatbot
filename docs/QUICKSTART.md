@@ -118,6 +118,37 @@ python src/examples/mcp_examples.py --interactive   # MCP demo loop
 - **Stale embeddings** — delete `data/embeddings/embeddings_cache.pkl` or call `chatbot.clear_documents(delete_cache=True)`. A model-mismatch cache is auto-rejected on load with a `WARNING` log, but you still need to re-ingest the documents.
 - **Logs** — daily files under `data/logs/rag_system_YYYYMMDD.log`. Bump `system.log_level` to `DEBUG` for verbose tracing.
 
+## 10b. Tuning for small GPUs (≤ 4 GB VRAM)
+
+The engine auto-tunes Ollama settings to the detected hardware. With the defaults
+in `config/config.json` (`llm.num_ctx: "auto"`, `system.ollama_env.*: "auto"`,
+`system.auto_tune: true`), the engine probes VRAM via `nvidia-smi` and picks:
+
+| Tier | VRAM | `num_ctx` | `kv_cache_type` | `num_gpu` | `keep_alive` |
+|------|------|-----------|-----------------|-----------|--------------|
+| cpu     | none      | 2048 | f16   | 0   | 10m |
+| tight   | ≤ 5 GB    | 2048 | q8_0  | 999 | 24h |
+| mid     | ≤ 9 GB    | 4096 | f16   | 999 | 24h |
+| ample   | > 9 GB    | 8192 | f16   | 999 | 24h |
+
+To pin a specific value, replace `"auto"` with the value you want — explicit
+config always wins over auto-detection. To disable detection entirely, set
+`system.auto_tune: false`.
+
+`OLLAMA_*` env vars only affect the `ollama serve` process, which is started
+by you. The engine exports them into its own process for inheritance, but
+for the Ollama server to honour them, set them in the shell that runs
+`ollama serve`:
+
+```bash
+export OLLAMA_NUM_GPU=999 OLLAMA_KV_CACHE_TYPE=q8_0 OLLAMA_KEEP_ALIVE=24h
+ollama serve
+```
+
+`keep_alive` is the most impactful for interactive use — cold-loading a 4B
+model on a 4 GB card takes seconds; keeping it resident for 24 hours
+amortizes that across the session.
+
 ## 11. Configuration Cheatsheet
 
 ```python

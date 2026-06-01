@@ -45,7 +45,13 @@ try:
     from .llm_interface import LLMInterface
     from .query_analyzer import QueryAnalyzer
     from .conversation_manager import ConversationManager
-    from .utils import setup_logging, validate_input, sanitize_output
+    from .utils import (
+        setup_logging,
+        validate_input,
+        sanitize_output,
+        apply_ollama_env,
+        resolve_ollama_tuning,
+    )
 except ImportError:
     if __package__:
         raise
@@ -54,7 +60,13 @@ except ImportError:
     from llm_interface import LLMInterface
     from query_analyzer import QueryAnalyzer
     from conversation_manager import ConversationManager
-    from utils import setup_logging, validate_input, sanitize_output
+    from utils import (
+        setup_logging,
+        validate_input,
+        sanitize_output,
+        apply_ollama_env,
+        resolve_ollama_tuning,
+    )
 
 logger = logging.getLogger(__name__)
 
@@ -85,7 +97,27 @@ class FinalRAGChatbot:
         # Setup logging
         setup_logging(self.config["system"]["log_level"], self.config["paths"]["logs_dir"])
         logger.info(f"Initializing Final RAG Chatbot for role: {role}")
-        
+
+        # Auto-tune Ollama settings to the detected hardware (VRAM tier
+        # picks num_ctx + KV cache type + GPU offload). User-set values in
+        # config always win — auto-detection only fills gaps marked
+        # "auto" or left out entirely. Disable with system.auto_tune=false.
+        tuning = resolve_ollama_tuning(self.config)
+        self.config["llm"]["num_ctx"] = tuning["num_ctx"]
+        self.config["system"]["ollama_env"] = tuning["ollama_env"]
+        if tuning["auto_tune"]:
+            logger.info(
+                "Auto-tune: tier=%s vram=%.1fGB ram=%.1fGB → num_ctx=%s, ollama_env=%s",
+                tuning["tier"],
+                tuning["hardware"]["gpu_vram_gb"],
+                tuning["hardware"]["ram_gb"],
+                tuning["num_ctx"],
+                tuning["ollama_env"],
+            )
+        exported = apply_ollama_env(tuning["ollama_env"])
+        if exported:
+            logger.info(f"Exported Ollama tuning env: {sorted(exported)}")
+
         # Initialize components
         self._initialize_components()
         
