@@ -13,7 +13,7 @@ import os
 import re
 import logging
 import json
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, Tuple
 from datetime import datetime
 from pathlib import Path
 
@@ -687,6 +687,30 @@ def apply_ollama_env(ollama_env: Optional[Dict[str, Any]]) -> Dict[str, str]:
         os.environ[env_name] = str(ollama_env[key])
         exported[env_name] = os.environ[env_name]
     return exported
+
+
+def reciprocal_rank_fusion(
+    rankings: List[List[Any]], k: int = 60
+) -> List[Tuple[Any, float]]:
+    """Fuse several ranked id lists with Reciprocal Rank Fusion.
+
+    Each input is an ordered list of ids (best first). A document's fused score
+    is ``sum(1 / (k + rank))`` over the lists it appears in, where ``rank`` is
+    its 0-based position in that list. The constant ``k`` damps the influence of
+    top ranks so a single list cannot dominate the fusion.
+
+    Args:
+        rankings: List of ranked id lists from each retriever leg.
+        k: RRF damping constant (typically 60).
+
+    Returns:
+        ``(doc_id, score)`` pairs sorted by fused score descending.
+    """
+    scores: Dict[Any, float] = {}
+    for ranking in rankings:
+        for rank, doc_id in enumerate(ranking):
+            scores[doc_id] = scores.get(doc_id, 0.0) + 1.0 / (k + rank)
+    return sorted(scores.items(), key=lambda pair: pair[1], reverse=True)
 
 
 class PerformanceMonitor:

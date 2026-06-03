@@ -5,6 +5,7 @@
 scikit-learn
 numpy
 pandas
+rank-bm25     # BM25 sparse retriever for hybrid retrieval
 
 # Ollama integration
 requests      # HTTP requests

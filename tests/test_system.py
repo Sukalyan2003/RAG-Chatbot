@@ -52,7 +52,20 @@ class FakeArray:
 
 
 def install_fake_numeric_modules():
-    """Install tiny numpy/sklearn stand-ins for dependency-light tests."""
+    """Provide a numpy/sklearn numeric stack for the tests.
+
+    Prefers the real packages when they are importable (so dependents like
+    ``rank_bm25`` that build on numpy work correctly); falls back to the tiny
+    stand-ins below only when numpy/scikit-learn are genuinely absent, keeping
+    the suite runnable in a dependency-light environment.
+    """
+
+    try:
+        import numpy  # noqa: F401
+        import sklearn.metrics.pairwise  # noqa: F401
+        return
+    except ImportError:
+        pass
 
     def as_rows(value):
         if isinstance(value, FakeArray):
@@ -677,6 +690,70 @@ class SystemTests(unittest.TestCase):
         # The other two come from the tight-tier defaults.
         self.assertEqual("24h", tuning["ollama_env"]["keep_alive"])
         self.assertEqual(999, tuning["ollama_env"]["num_gpu"])
+
+    def test_reciprocal_rank_fusion_known_input(self):
+        from core.utils import reciprocal_rank_fusion
+
+        dense = ["a", "b", "c"]
+        bm25 = ["c", "b", "d"]
+        fused = reciprocal_rank_fusion([dense, bm25], k=60)
+        fused_scores = dict(fused)
+
+        # "b" is rank 1 in both lists; "c" is rank 2 (dense) and rank 0 (bm25).
+        self.assertAlmostEqual(fused_scores["b"], 1 / 61 + 1 / 61)
+        self.assertAlmostEqual(fused_scores["c"], 1 / 62 + 1 / 60)
+        self.assertAlmostEqual(fused_scores["a"], 1 / 60)
+        self.assertAlmostEqual(fused_scores["d"], 1 / 62)
+
+        # "c" edges out "b" because the rank-0 BM25 hit dominates.
+        self.assertEqual("c", fused[0][0])
+        # Result is sorted by fused score descending.
+        scores_in_order = [score for _, score in fused]
+        self.assertEqual(scores_in_order, sorted(scores_in_order, reverse=True))
+
+    def test_hybrid_retrieval_surfaces_dense_and_lexical_matches(self):
+        install_fake_numeric_modules()
+        from core.embedding_manager import EmbeddingManager
+
+        config = copy.deepcopy(self.config)
+        config["embedding"]["provider"] = "ollama"
+        config["retrieval"]["hybrid_enabled"] = True
+        config["retrieval"]["rerank_results"] = False
+        config["retrieval"]["similarity_threshold"] = 0.99  # dense-only would drop the lexical hit
+
+        # Dense leg (fake embeddings) keys off the phrase "artificial intelligence";
+        # the lexical chunk has no embedding overlap (cosine below threshold) and is
+        # only reachable through the BM25 leg's exact-token match on "qwen3-embedding".
+        docs = [
+            {"content": "A discussion of artificial intelligence and reasoning.",
+             "metadata": {"source": "dense_hit.txt", "type": "text"}},
+            {"content": "Configure the qwen3-embedding model identifier here.",
+             "metadata": {"source": "lexical_hit.txt", "type": "text"}},
+        ]
+
+        manager = EmbeddingManager(config)
+        with patch("requests.post", side_effect=fake_ollama_post):
+            self.assertTrue(manager.add_documents(docs))
+            results = manager.retrieve_documents(
+                "artificial intelligence qwen3-embedding", max_results=2, threshold=0.99
+            )
+
+            # Dense-only with the same strict threshold drops the lexical hit.
+            config["retrieval"]["hybrid_enabled"] = False
+            dense_only = manager.retrieve_documents(
+                "artificial intelligence qwen3-embedding", max_results=2, threshold=0.99
+            )
+
+        sources = {doc["metadata"]["source"] for doc in results}
+        # Hybrid surfaces both legs; the lexical hit survives despite being below
+        # the cosine threshold that dense-only enforces.
+        self.assertIn("dense_hit.txt", sources)
+        self.assertIn("lexical_hit.txt", sources)
+        self.assertTrue(all("fusion_score" in doc for doc in results))
+
+        dense_sources = {doc["metadata"]["source"] for doc in dense_only}
+        self.assertIn("dense_hit.txt", dense_sources)
+        self.assertNotIn("lexical_hit.txt", dense_sources)
 
     def test_clear_documents_removes_persisted_cache(self):
         install_fake_numeric_modules()

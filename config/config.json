@@ -24,7 +24,11 @@
         "chunk_size": 1000,
         "chunk_overlap": 200,
         "rerank_results": true,
-        "rerank_oversample_factor": 4
+        "rerank_oversample_factor": 4,
+        "hybrid_enabled": true,
+        "bm25_top_k": 20,
+        "dense_top_k": 20,
+        "rrf_k": 60
     },
     "system": {
         "log_level": "INFO",

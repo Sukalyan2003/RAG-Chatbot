@@ -16,6 +16,13 @@ import logging
 import pickle
 from typing import Callable, List, Dict, Any, Optional, Tuple
 
+try:
+    from .bm25_index import BM25Index
+    from .utils import reciprocal_rank_fusion
+except ImportError:  # pragma: no cover - allows running as a top-level module
+    from bm25_index import BM25Index
+    from utils import reciprocal_rank_fusion
+
 CACHE_SCHEMA_VERSION = 1
 
 # Progress callback signature: (stage, current, total) where current/total may be None.
@@ -87,7 +94,10 @@ class EmbeddingManager:
         self.embedding_model = None
         self.last_added_count = 0
         self.last_skipped_count = 0
-        
+
+        # Sparse lexical index kept in sync with self.documents for hybrid retrieval
+        self.bm25 = BM25Index()
+
         # Initialize embedding model
         self._initialize_embedding_model()
 
@@ -198,6 +208,7 @@ class EmbeddingManager:
 
             # Add to storage
             self.documents.extend(documents)
+            self.bm25.add([(self._chunk_id(doc), doc["content"]) for doc in documents])
 
             if self.embeddings is None:
                 self.embeddings = new_embeddings
@@ -233,6 +244,20 @@ class EmbeddingManager:
             chunk_marker,
             content_hash,
         )
+
+    def _rebuild_bm25(self) -> None:
+        """Rebuild the sparse index from scratch to match ``self.documents``."""
+        self.bm25.clear()
+        self.bm25.add([(self._chunk_id(doc), doc.get("content", "")) for doc in self.documents])
+
+    def _chunk_id(self, doc: Dict) -> str:
+        """Stable string id for a chunk, shared by the dense and BM25 legs.
+
+        Derived from ``_document_key`` so it matches whether the chunk is freshly
+        added or rehydrated from cache, and stays unique across sources that
+        happen to share identical content.
+        """
+        return repr(self._document_key(doc))
 
     @staticmethod
     def _content_hash(content: str) -> str:
@@ -353,16 +378,17 @@ class EmbeddingManager:
         """
         Retrieve relevant documents based on query similarity.
 
-        When ``retrieval.rerank_results`` is enabled, an oversampled candidate
-        set (``max_results * rerank_oversample_factor``) is fetched from dense
-        cosine similarity, passed through ``rerank_results``, and trimmed to
-        ``max_results``. When reranking is disabled, dense top-K is returned
-        directly.
+        With ``retrieval.hybrid_enabled`` (and ``rank_bm25`` installed), a dense
+        cosine ranking and a BM25 lexical ranking are fused with reciprocal rank
+        fusion to form the candidate set; otherwise a dense-only, threshold-gated
+        ranking is used. When ``retrieval.rerank_results`` is enabled the
+        oversampled candidate set (``max_results * rerank_oversample_factor``) is
+        passed through ``rerank_results`` and trimmed to ``max_results``.
 
         Args:
             query: Search query
             max_results: Maximum number of results to return
-            threshold: Minimum similarity threshold
+            threshold: Minimum similarity threshold (dense-only path)
 
         Returns:
             List of relevant documents with similarity scores
@@ -375,26 +401,25 @@ class EmbeddingManager:
             retrieval_config = self.config.get("retrieval", {})
             rerank_enabled = retrieval_config.get("rerank_results", False)
             oversample_factor = retrieval_config.get("rerank_oversample_factor", 4)
+            hybrid_enabled = retrieval_config.get("hybrid_enabled", False)
 
             candidate_limit = max_results * oversample_factor if rerank_enabled else max_results * 2
 
-            # Generate query embedding
+            # Generate query embedding and dense cosine similarities (needed by
+            # both paths; also used as the displayed similarity_score in hybrid).
             query_embedding = self._embed_query(query)
-
-            # Calculate similarities
             similarities = cosine_similarity(query_embedding, self.embeddings)[0]
 
-            # Get indices sorted by similarity (descending)
-            sorted_indices = np.argsort(similarities)[::-1]
-
-            # Collect threshold-passing candidates up to the oversampled cap
-            candidates = []
-            for idx in sorted_indices[:candidate_limit]:
-                similarity = similarities[idx]
-                if similarity >= threshold:
-                    doc = self.documents[idx].copy()
-                    doc["similarity_score"] = float(similarity)
-                    candidates.append(doc)
+            if hybrid_enabled and self.bm25.available:
+                candidates = self._hybrid_candidates(
+                    query, similarities, retrieval_config, candidate_limit
+                )
+                mode = "hybrid"
+            else:
+                candidates = self._dense_candidates(
+                    similarities, threshold, candidate_limit
+                )
+                mode = "dense"
 
             if rerank_enabled and candidates:
                 candidates = self.rerank_results(candidates, query)
@@ -402,14 +427,66 @@ class EmbeddingManager:
             relevant_docs = candidates[:max_results]
 
             logger.info(
-                "Retrieved %s relevant documents for query (candidates=%s, rerank=%s)",
-                len(relevant_docs), len(candidates), rerank_enabled,
+                "Retrieved %s relevant documents for query (mode=%s, candidates=%s, rerank=%s)",
+                len(relevant_docs), mode, len(candidates), rerank_enabled,
             )
             return relevant_docs
 
         except Exception as e:
             logger.error(f"Error retrieving documents: {e}")
             return []
+
+    def _dense_candidates(
+        self, similarities, threshold: float, candidate_limit: int
+    ) -> List[Dict]:
+        """Dense-only candidates: threshold-gated cosine top-K."""
+        sorted_indices = np.argsort(similarities)[::-1]
+        candidates = []
+        for idx in sorted_indices[:candidate_limit]:
+            similarity = similarities[idx]
+            if similarity >= threshold:
+                doc = self.documents[idx].copy()
+                doc["similarity_score"] = float(similarity)
+                candidates.append(doc)
+        return candidates
+
+    def _hybrid_candidates(
+        self, query: str, similarities, retrieval_config: Dict, candidate_limit: int
+    ) -> List[Dict]:
+        """Fuse dense and BM25 rankings with reciprocal rank fusion.
+
+        The dense leg and the BM25 leg each contribute a ranked list of chunk
+        ids; RRF combines them and the top ``candidate_limit`` fused chunks are
+        materialized as documents (carrying their dense cosine ``similarity_score``
+        for display and the ``fusion_score`` used for ordering). Unlike the
+        dense-only path this does not apply the cosine threshold, so chunks that
+        match lexically but embed poorly still surface.
+        """
+        dense_top_k = retrieval_config.get("dense_top_k", 20)
+        bm25_top_k = retrieval_config.get("bm25_top_k", 20)
+        rrf_k = retrieval_config.get("rrf_k", 60)
+
+        chunk_ids = [self._chunk_id(doc) for doc in self.documents]
+        pos_for_id = {}
+        for position, chunk_id in enumerate(chunk_ids):
+            pos_for_id.setdefault(chunk_id, position)
+
+        dense_order = np.argsort(similarities)[::-1][:dense_top_k]
+        dense_ranking = [chunk_ids[idx] for idx in dense_order]
+        bm25_ranking = [chunk_id for chunk_id, _ in self.bm25.query(query, bm25_top_k)]
+
+        fused = reciprocal_rank_fusion([dense_ranking, bm25_ranking], k=rrf_k)
+
+        candidates = []
+        for chunk_id, fusion_score in fused[:candidate_limit]:
+            position = pos_for_id.get(chunk_id)
+            if position is None:
+                continue
+            doc = self.documents[position].copy()
+            doc["similarity_score"] = float(similarities[position])
+            doc["fusion_score"] = float(fusion_score)
+            candidates.append(doc)
+        return candidates
 
     def get_similar_documents(self, document_index: int, max_results: int = 5) -> List[Dict]:
         """
@@ -465,11 +542,17 @@ class EmbeddingManager:
                 return False
             
             # Update document content
+            old_chunk_id = self._chunk_id(self.documents[document_index])
             self.documents[document_index]["content"] = new_content
-            
+            self.documents[document_index].get("metadata", {}).pop("content_hash", None)
+
             # Regenerate embedding
             new_embedding = self._embed_query(new_content)
             self.embeddings[document_index] = new_embedding[0]
+
+            # Keep the sparse index in sync with the new content
+            self.bm25.remove([old_chunk_id])
+            self.bm25.add([(self._chunk_id(self.documents[document_index]), new_content)])
             
             logger.info(f"Updated document {document_index}")
             return True
@@ -494,8 +577,10 @@ class EmbeddingManager:
                 return False
             
             # Remove document
+            removed_chunk_id = self._chunk_id(self.documents[document_index])
             del self.documents[document_index]
-            
+            self.bm25.remove([removed_chunk_id])
+
             # Remove embedding
             if self.embeddings is not None:
                 self.embeddings = np.delete(self.embeddings, document_index, axis=0)
@@ -566,6 +651,7 @@ class EmbeddingManager:
                 )
                 self.documents = []
                 self.embeddings = None
+                self.bm25.clear()
                 return False
 
             embeddings_data = cached_data.get("embeddings")
@@ -589,6 +675,8 @@ class EmbeddingManager:
             if embeddings_data is not None:
                 self.embeddings = np.array(embeddings_data)
 
+            self._rebuild_bm25()
+
             logger.info(f"Loaded {len(self.documents)} documents from cache")
             return True
 
@@ -596,6 +684,7 @@ class EmbeddingManager:
             logger.error(f"Error loading cached embeddings: {e}")
             self.documents = []
             self.embeddings = None
+            self.bm25.clear()
             return False
 
     def get_cached_embeddings(self) -> Dict:
@@ -617,6 +706,7 @@ class EmbeddingManager:
         """Clear all documents and embeddings."""
         self.documents = []
         self.embeddings = None
+        self.bm25.clear()
         logger.info("Cleared embedding cache")
 
     def get_document_count(self) -> int:
