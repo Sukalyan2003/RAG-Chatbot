@@ -617,6 +617,7 @@ class FinalRAGChatbot:
         - Answer ONLY from the provided context. Do not supplement with general knowledge, training data, encyclopedic background, or "standard" definitions.
         - If the context does not contain enough information to answer the question, reply exactly: "The provided documents do not cover this." and stop. Do not guess, do not fall back to general knowledge, and do not add a disclaimer pointing to outside sources.
         - Never write phrases like "based on general knowledge", "as per standard principles", "according to NIST/ISO/textbooks", or similar — if it isn't in the context, it doesn't belong in the answer.
+        - But you can interpret the knowledge in the documents and connect the dots between them to answer questions, as long as you don't introduce unsupported information.
         - Keep responses professional and respectful.
         - Use readable Markdown: short paragraphs, bullet lists, and tables when helpful.
         - Do not append your own source list; the system adds sources separately.
