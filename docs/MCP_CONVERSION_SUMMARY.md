@@ -6,24 +6,24 @@ The RAG engine and the MCP transport are decoupled. Everything in `src/core/` ca
 
 ### Server
 
-- `MCPProtocolHandler` — request router for JSON-RPC 2.0 methods (`initialize`, `tools/list`, `tools/call`, `resources/list`, `resources/read`, `prompts/list`, `prompts/get`). Lazily constructs a single `FinalRAGChatbot` and switches its `role` per request rather than spinning up a chatbot per call.
-- `MCPStdioServer` — reads newline-delimited JSON-RPC requests from stdin, writes responses to stdout, routes logs to stderr.
-- `main()` in `mcp_server.py` — CLI entrypoint with `--config` and `--log-level`.
+- `MCPProtocolHandler` - request router for JSON-RPC 2.0 methods (`initialize`, `tools/list`, `tools/call`, `resources/list`, `resources/read`, `prompts/list`, `prompts/get`). Lazily constructs a single `FinalRAGChatbot` and switches its `role` per request rather than spinning up a chatbot per call.
+- `MCPStdioServer` - reads newline-delimited JSON-RPC requests from stdin, writes responses to stdout, routes logs to stderr.
+- `main()` in `mcp_server.py` - CLI entrypoint with `--config` and `--log-level`.
 
 ### Client
 
-- `MCPClient` — async subprocess client. Handles request IDs, ignores accidental non-JSON stdout lines, terminates the child process cleanly, exposes typed helpers for every tool/resource/prompt.
-- `MCPIntegratedRAG` — async context manager with the same surface as `FinalRAGChatbot`. Has a `use_mcp=False` mode that falls through to a direct `FinalRAGChatbot` instance for tests or environments where a subprocess is undesirable.
-- `FinalRAGChatbotMCP` — subclass of `MCPIntegratedRAG` matching the original constructor signature; useful for swapping in without changing call sites.
+- `MCPClient` - async subprocess client. Handles request IDs, ignores accidental non-JSON stdout lines, terminates the child process cleanly, exposes typed helpers for every tool/resource/prompt.
+- `MCPIntegratedRAG` - async context manager with the same surface as `FinalRAGChatbot`. Has a `use_mcp=False` mode that falls through to a direct `FinalRAGChatbot` instance for tests or environments where a subprocess is undesirable.
+- `FinalRAGChatbotMCP` - subclass of `MCPIntegratedRAG` matching the original constructor signature; useful for swapping in without changing call sites.
 
 ### Launchers
 
-- `launch_mcp_server.py` — cross-platform Python launcher.
-- `start_mcp.ps1` — Windows/PowerShell launcher; supports `-ServerOnly`, `-StreamlitOnly`, configurable `-Config` and `-LogLevel`.
+- `launch_mcp_server.py` - cross-platform Python launcher.
+- `start_mcp.ps1` - Windows/PowerShell launcher; supports `-ServerOnly`, `-StreamlitOnly`, configurable `-Config` and `-LogLevel`.
 
 ### UI
 
-- `src/ui/streamlit_app_mcp.py` — Streamlit app that talks to the MCP server through `MCPIntegratedRAG`. Maintains a single asyncio loop per session so subprocess pipes stay coherent across Streamlit reruns. Includes a checkbox to toggle MCP off and use direct imports instead.
+- `src/ui/streamlit_app_mcp.py` - Streamlit app that talks to the MCP server through `MCPIntegratedRAG`. Maintains a single asyncio loop per session so subprocess pipes stay coherent across Streamlit reruns. Includes a checkbox to toggle MCP off and use direct imports instead.
 
 ## Tools, Resources, Prompts
 
@@ -35,8 +35,8 @@ See [MCP_QUICKSTART.md](MCP_QUICKSTART.md) for the full table. In short:
 
 ## Configuration Touchpoints
 
-- `config.mcp` — protocol version, server timeout, stdio buffer size, transport flags.
-- `config.roles[*].mcp_tools` — per-role allowlist of tool names the role may invoke.
+- `config.mcp` - protocol version, server timeout, stdio buffer size, transport flags.
+- `config.roles[*].mcp_tools` - per-role allowlist of tool names the role may invoke.
 - Roles are normalized case-insensitively against `Admin`, `Expert`, `User`, `Guest` before any tool runs.
 
 ## Integrating With An MCP Client

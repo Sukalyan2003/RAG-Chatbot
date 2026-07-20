@@ -18,7 +18,7 @@ from examples.example_utils import response_to_text
 
 def create_test_documents():
     """Create various test documents for processing."""
-    print("📄 Creating test documents...")
+    print(" Creating test documents...")
     
     test_dir = Path("test_documents")
     test_dir.mkdir(exist_ok=True)
@@ -64,12 +64,12 @@ K-Means,Unsupervised,Clustering,Groups data into k clusters
 Neural Networks,Supervised/Unsupervised,Various,Mimics human brain structure for learning
 Random Forest,Supervised,Classification/Regression,Ensemble method using multiple decision trees""")
     
-    print(f"   ✓ Created test documents in {test_dir}")
+    print(f"    Created test documents in {test_dir}")
     return test_dir
 
 def test_document_processor():
     """Test the document processor with various file types."""
-    print("\n🔧 Testing Document Processor")
+    print("\n Testing Document Processor")
     print("-" * 40)
     
     # Load configuration
@@ -87,7 +87,7 @@ def test_document_processor():
         print(f"Processing documents from {test_dir}...")
         documents = processor.process_documents(str(test_dir))
         
-        print(f"\n📊 Processing Results:")
+        print(f"\n Processing Results:")
         print(f"   Total document chunks: {len(documents)}")
         
         # Show details for each document type
@@ -99,7 +99,7 @@ def test_document_processor():
             doc_types[doc_type].append(doc)
         
         for doc_type, docs in doc_types.items():
-            print(f"\n   📁 {doc_type.upper()} files:")
+            print(f"\n    {doc_type.upper()} files:")
             print(f"      Chunks: {len(docs)}")
             
             # Show sample content
@@ -117,7 +117,7 @@ def test_document_processor():
 
 def test_with_chatbot():
     """Test processed documents with the chatbot."""
-    print("\n🤖 Testing with Chatbot")
+    print("\n Testing with Chatbot")
     print("-" * 40)
     
     try:
@@ -148,14 +148,14 @@ def test_with_chatbot():
             "What tools are used in data science?"
         ]
         
-        print("\n❓ Testing questions:")
+        print("\n Testing questions:")
         for question in test_questions:
             print(f"\n   Q: {question}")
             response = response_to_text(chatbot.chat(question, stream=False))
             print(f"   A: {response[:150]}...")
         
         # Show statistics
-        print(f"\n📊 Final Statistics:")
+        print(f"\nFinal Statistics:")
         stats = chatbot.get_stats()
         for key, value in stats.items():
             print(f"   {key}: {value}")
@@ -165,7 +165,7 @@ def test_with_chatbot():
 
 def test_web_processing():
     """Test web content processing (if available)."""
-    print("\n🌐 Testing Web Content Processing")
+    print("\n Testing Web Content Processing")
     print("-" * 40)
     
     try:
@@ -183,22 +183,22 @@ def test_web_processing():
         documents = processor.process_documents(test_url, "web")
         
         if documents:
-            print(f"   ✓ Successfully processed web content")
-            print(f"   ✓ Generated {len(documents)} chunks")
+            print(f"    Successfully processed web content")
+            print(f"    Generated {len(documents)} chunks")
             
             # Show sample content
             if documents:
                 sample = documents[0]['content'][:200] + "..."
                 print(f"   Sample: {sample}")
         else:
-            print("   ❌ Web processing not available or failed")
+            print("    Web processing not available or failed")
             
     except Exception as e:
-        print(f"   ❌ Web processing error: {e}")
+        print(f"    Web processing error: {e}")
 
 def cleanup_test_files():
     """Clean up test files."""
-    print("\n🧹 Cleaning up test files...")
+    print("\n Cleaning up test files...")
     
     try:
         import shutil
@@ -206,16 +206,16 @@ def cleanup_test_files():
         
         if test_dir.exists():
             shutil.rmtree(test_dir)
-            print("   ✓ Test files cleaned up")
+            print("    Test files cleaned up")
         else:
-            print("   ✓ No test files to clean up")
+            print("    No test files to clean up")
             
     except Exception as e:
-        print(f"   ❌ Error cleaning up: {e}")
+        print(f"    Error cleaning up: {e}")
 
 def main():
     """Main function."""
-    print("📚 Document Processing Example")
+    print(" Document Processing Example")
     print("=" * 50)
     
     try:
@@ -234,7 +234,7 @@ def main():
         if keep_files != 'y':
             cleanup_test_files()
         
-        print("\n✅ Document processing example completed!")
+        print("\n Document processing example completed!")
         
     except KeyboardInterrupt:
         print("\n\nExample interrupted by user")

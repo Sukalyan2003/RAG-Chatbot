@@ -31,7 +31,7 @@ def prepare_chatbot(role: str = "User") -> FinalRAGChatbot:
 
 async def test_conversation_history():
     """Test conversation history management."""
-    print("💬 Testing Conversation History")
+    print(" Testing Conversation History")
     print("-" * 40)
     
     chatbot = prepare_chatbot("User")
@@ -51,7 +51,7 @@ async def test_conversation_history():
     
     # Show conversation history
     history = chatbot.conversation_manager.get_full_history(chatbot.role)
-    print(f"\n📊 Conversation Statistics:")
+    print(f"\n Conversation Statistics:")
     print(f"   Total turns: {len(history)}")
     print(f"   Role: {chatbot.role}")
     
@@ -65,14 +65,14 @@ async def test_conversation_history():
 
 def test_role_based_access():
     """Test different roles and their capabilities."""
-    print("\n👥 Testing Role-Based Access Control")
+    print("\n Testing Role-Based Access Control")
     print("-" * 40)
     
     roles = ["User", "Expert", "Admin"]
     test_question = "Explain machine learning algorithms"
     
     for role in roles:
-        print(f"\n🎭 Testing role: {role}")
+        print(f"\n Testing role: {role}")
         chatbot = prepare_chatbot(role)
         
         response = response_to_text(chatbot.chat(test_question, stream=False))
@@ -95,7 +95,7 @@ def test_role_based_access():
 
 def test_performance_monitoring():
     """Test performance monitoring features."""
-    print("\n📈 Testing Performance Monitoring")
+    print("\n Testing Performance Monitoring")
     print("-" * 40)
     
     chatbot = prepare_chatbot("User")
@@ -111,11 +111,11 @@ def test_performance_monitoring():
     print("Running test queries...")
     for query in test_queries:
         chatbot.chat(query, stream=False)
-        print(f"   ✓ Processed: {query[:30]}...")
+        print(f"    Processed: {query[:30]}...")
     
     # Get performance statistics
     stats = chatbot.get_stats()
-    print(f"\n📊 Performance Statistics:")
+    print(f"\n Performance Statistics:")
     for metric, value in stats.items():
         if isinstance(value, float):
             print(f"   {metric}: {value:.3f}")
@@ -124,7 +124,7 @@ def test_performance_monitoring():
 
 async def test_async_operations():
     """Test asynchronous operations."""
-    print("\n⚡ Testing Async Operations")
+    print("\n Testing Async Operations")
     print("-" * 40)
     
     chatbot = prepare_chatbot("User")
@@ -147,9 +147,9 @@ async def test_async_operations():
     end_time = datetime.now()
     duration = (end_time - start_time).total_seconds()
     
-    print(f"   ✓ Processed {len(queries)} queries concurrently")
+    print(f"    Processed {len(queries)} queries concurrently")
     print(f"   ⏱️  Total time: {duration:.2f} seconds")
-    print(f"   📊 Average time per query: {duration/len(queries):.2f} seconds")
+    print(f"    Average time per query: {duration/len(queries):.2f} seconds")
     
     # Show response summaries
     for i, (query, response) in enumerate(zip(queries, responses), 1):
@@ -157,7 +157,7 @@ async def test_async_operations():
 
 def test_custom_prompting():
     """Test custom prompting strategies."""
-    print("\n🎯 Testing Custom Prompting Strategies")
+    print("\n Testing Custom Prompting Strategies")
     print("-" * 40)
     
     chatbot = prepare_chatbot("Expert")
@@ -174,7 +174,7 @@ def test_custom_prompting():
     ]
     
     for strategy_name, prompt in prompt_strategies:
-        print(f"\n🎲 Strategy: {strategy_name}")
+        print(f"\n Strategy: {strategy_name}")
         response = response_to_text(chatbot.chat(prompt, stream=False))
         
         # Analyze response characteristics
@@ -188,7 +188,7 @@ def test_custom_prompting():
 
 def test_error_handling():
     """Test error handling and recovery."""
-    print("\n🛡️  Testing Error Handling")
+    print("\n️  Testing Error Handling")
     print("-" * 40)
     
     chatbot = prepare_chatbot("User")
@@ -197,23 +197,23 @@ def test_error_handling():
     test_cases = [
         ("Empty query", ""),
         ("Very long query", "A" * 10000),
-        ("Special characters", "What is ★♦♠♣ in programming?"),
+        ("Special characters", "What is  in programming?"),
         ("Multiple languages", "¿Qué es la programación? What is programming? 프로그래밍이란?"),
         ("Invalid characters", "What is \x00\x01\x02 programming?")
     ]
     
     for test_name, query in test_cases:
-        print(f"\n🧪 Test: {test_name}")
+        print(f"\n Test: {test_name}")
         try:
             response = response_to_text(chatbot.chat(query, stream=False))
-            print(f"   ✓ Handled successfully")
+            print(f"    Handled successfully")
             print(f"   Response length: {len(response)}")
         except Exception as e:
-            print(f"   ❌ Error: {e}")
+            print(f"    Error: {e}")
 
 def test_memory_usage():
     """Test memory usage and cleanup."""
-    print("\n🧠 Testing Memory Management")
+    print("\n Testing Memory Management")
     print("-" * 40)
     
     import psutil
@@ -248,7 +248,7 @@ def test_memory_usage():
 
 async def main():
     """Main async function."""
-    print("🚀 Advanced RAG Features Example")
+    print(" Advanced RAG Features Example")
     print("=" * 50)
     
     try:
@@ -273,14 +273,14 @@ async def main():
         # Test memory usage
         test_memory_usage()
         
-        print("\n✅ Advanced features example completed!")
+        print("\n Advanced features example completed!")
         
     except Exception as e:
         print(f"\nError running advanced example: {e}")
 
 def run_sync_only():
     """Run only synchronous tests."""
-    print("🚀 Advanced RAG Features Example (Sync Only)")
+    print(" Advanced RAG Features Example (Sync Only)")
     print("=" * 50)
     
     try:
@@ -299,7 +299,7 @@ def run_sync_only():
         # Test memory usage
         test_memory_usage()
         
-        print("\n✅ Synchronous advanced features example completed!")
+        print("\n Synchronous advanced features example completed!")
         
     except Exception as e:
         print(f"\nError running example: {e}")

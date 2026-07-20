@@ -456,7 +456,7 @@ class MCPIntegratedRAG:
             if isinstance(response, dict):
                 return json.dumps(response, indent=2)
             if not isinstance(response, str):
-                # Streaming path returns a generator — collapse to a string
+                # Streaming path returns a generator - collapse to a string
                 # here so the async surface stays string-typed. Callers that
                 # want true token streaming should use chat_stream().
                 return "".join(response)

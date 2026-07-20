@@ -55,12 +55,12 @@ def install_package(pip_name: str) -> bool:
         )
         return True
     except subprocess.CalledProcessError as e:
-        print(f"   ❌ Failed to install {pip_name}: {e}")
+        print(f"    Failed to install {pip_name}: {e}")
         return False
 
 def check_python_version():
     """Check if Python version is compatible."""
-    print("🐍 Checking Python Version")
+    print(" Checking Python Version")
     print("-" * 30)
     
     version = sys.version_info
@@ -69,15 +69,15 @@ def check_python_version():
     print(f"   Current version: {version_str}")
     
     if version.major >= 3 and version.minor >= 8:
-        print("   ✅ Python version is compatible")
+        print("    Python version is compatible")
         return True
     else:
-        print("   ❌ Python 3.8+ required")
+        print("    Python 3.8+ required")
         return False
 
 def check_dependencies() -> Tuple[List[Tuple[str, str, str]], List[str]]:
     """Check all dependencies and return missing packages."""
-    print("\n📦 Checking Dependencies")
+    print("\n Checking Dependencies")
     print("-" * 30)
     
     missing_packages = []
@@ -85,14 +85,14 @@ def check_dependencies() -> Tuple[List[Tuple[str, str, str]], List[str]]:
     
     for import_name, pip_name, description in REQUIRED_PACKAGES:
         if pip_name is None:  # Built-in package
-            print(f"   ✅ {import_name} (built-in)")
+            print(f"    {import_name} (built-in)")
             installed_packages.append(import_name)
         else:
             if check_package(import_name):
-                print(f"   ✅ {import_name}")
+                print(f"    {import_name}")
                 installed_packages.append(import_name)
             else:
-                print(f"   ❌ {import_name} - {description}")
+                print(f"    {import_name} - {description}")
                 missing_packages.append((import_name, pip_name, description))
     
     return missing_packages, installed_packages
@@ -102,29 +102,29 @@ def install_missing_packages(missing_packages: List[Tuple[str, str, str]]) -> bo
     if not missing_packages:
         return True
     
-    print(f"\n🔧 Installing Missing Packages")
+    print(f"\n Installing Missing Packages")
     print("-" * 30)
     
     failed_installations = []
     
     for import_name, pip_name, description in missing_packages:
         if install_package(pip_name):
-            print(f"   ✅ {import_name} installed successfully")
+            print(f"    {import_name} installed successfully")
         else:
             failed_installations.append((import_name, pip_name))
     
     if failed_installations:
-        print(f"\n❌ Failed to install:")
+        print(f"\n Failed to install:")
         for import_name, pip_name in failed_installations:
             print(f"   - {import_name} ({pip_name})")
         return False
     else:
-        print(f"\n✅ All packages installed successfully!")
+        print(f"\n All packages installed successfully!")
         return True
 
 def verify_installation():
     """Verify that the Final RAG system can be imported."""
-    print(f"\n🧪 Verifying System Installation")
+    print(f"\n Verifying System Installation")
     print("-" * 30)
     
     try:
@@ -146,21 +146,21 @@ def verify_installation():
         for component in components:
             try:
                 importlib.import_module(component)
-                print(f"   ✅ {component}")
+                print(f"    {component}")
             except ImportError as e:
-                print(f"   ❌ {component}: {e}")
+                print(f"    {component}: {e}")
                 return False
         
-        print(f"\n✅ Final RAG System verification successful!")
+        print(f"\nFinal RAG System verification successful!")
         return True
         
     except Exception as e:
-        print(f"   ❌ Verification failed: {e}")
+        print(f"    Verification failed: {e}")
         return False
 
 def create_requirements_file():
     """Create a requirements.txt file."""
-    print(f"\n📄 Creating requirements.txt")
+    print(f"\n Creating requirements.txt")
     print("-" * 30)
     
     try:
@@ -174,43 +174,43 @@ def create_requirements_file():
             f.write("# Install with: pip install -r requirements.txt\n\n")
             f.write("\n".join(requirements))
         
-        print(f"   ✅ requirements.txt created")
-        print(f"   💡 You can install all dependencies with: pip install -r requirements.txt")
+        print(f"    requirements.txt created")
+        print(f"    You can install all dependencies with: pip install -r requirements.txt")
         return True
         
     except Exception as e:
-        print(f"   ❌ Failed to create requirements.txt: {e}")
+        print(f"    Failed to create requirements.txt: {e}")
         return False
 
 def main():
     """Main function."""
-    print("🔍 Final RAG Chatbot - Dependency Checker")
+    print("Final RAG Chatbot - Dependency Checker")
     print("=" * 50)
     
     # Check Python version
     if not check_python_version():
-        print("\n❌ Incompatible Python version. Please upgrade to Python 3.8+")
+        print("\n Incompatible Python version. Please upgrade to Python 3.8+")
         return False
     
     # Check dependencies
     missing_packages, installed_packages = check_dependencies()
     
-    print(f"\n📊 Summary:")
-    print(f"   ✅ Installed: {len(installed_packages)}")
-    print(f"   ❌ Missing: {len(missing_packages)}")
+    print(f"\n Summary:")
+    print(f"    Installed: {len(installed_packages)}")
+    print(f"    Missing: {len(missing_packages)}")
     
     if missing_packages:
-        print(f"\n❓ Install missing packages? (y/n): ", end="")
+        print(f"\n Install missing packages? (y/n): ", end="")
         choice = input().strip().lower()
         
         if choice in ['y', 'yes']:
             if install_missing_packages(missing_packages):
-                print(f"\n✅ All dependencies installed!")
+                print(f"\n All dependencies installed!")
             else:
-                print(f"\n❌ Some installations failed. Please install manually.")
+                print(f"\n Some installations failed. Please install manually.")
                 return False
         else:
-            print(f"\n⚠️  Some dependencies are missing. The system may not work properly.")
+            print(f"\n️  Some dependencies are missing. The system may not work properly.")
             return False
     
     # Create requirements file
@@ -218,16 +218,16 @@ def main():
     
     # Verify installation
     if verify_installation():
-        print(f"\n🎉 Setup Complete!")
-        print(f"   ✅ All dependencies are ready")
-        print(f"   ✅ Final RAG system verified")
-        print(f"\n🚀 Next Steps:")
+        print(f"\n Setup Complete!")
+        print(f"    All dependencies are ready")
+        print(f"    Final RAG system verified")
+        print(f"\n Next Steps:")
         print(f"   1. Run: python tests/test_system.py")
         print(f"   2. Try: python src/examples/basic_usage.py")
         print(f"   3. Read: docs/QUICKSTART.md")
         return True
     else:
-        print(f"\n❌ Setup verification failed.")
+        print(f"\n Setup verification failed.")
         print(f"   Please check for errors and try again.")
         return False
 

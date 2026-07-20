@@ -26,7 +26,7 @@ from core.utils import validate_input
 # Configure Streamlit
 st.set_page_config(
     page_title="Final RAG Chatbot (MCP)",
-    page_icon="🤖",
+    page_icon="",
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -115,7 +115,7 @@ async def get_rag_system(role: str = None) -> MCPIntegratedRAG:
 
 def sidebar():
     """Create sidebar with controls."""
-    st.sidebar.title("🤖 RAG Chatbot Settings")
+    st.sidebar.title("RAG Chatbot Settings")
     
     # Role selection
     new_role = st.sidebar.selectbox(
@@ -140,7 +140,7 @@ def sidebar():
     st.sidebar.markdown("---")
     
     # Document management
-    st.sidebar.subheader("📄 Document Management")
+    st.sidebar.subheader("Document Management")
     
     upload_types = ["pdf", "txt", "md", "json", "csv"]
     if importlib.util.find_spec("docx"):
@@ -167,7 +167,7 @@ def sidebar():
     st.sidebar.markdown("---")
     
     # System controls
-    st.sidebar.subheader("⚙️ System Controls")
+    st.sidebar.subheader("️ System Controls")
     
     if st.sidebar.button("Clear Conversation"):
         run_async(clear_conversation())
@@ -182,12 +182,12 @@ def sidebar():
         export_chat_history()
 
 INGEST_STAGE_LABELS = {
-    "reading": "📖 Reading files",
-    "chunking": "✂️ Chunking text",
-    "dedup": "♻️ Deduplicating chunks",
-    "embedding": "🧬 Embedding chunks",
-    "storing": "🗄️ Storing embeddings",
-    "saving_cache": "💾 Persisting cache",
+    "reading": "Reading files",
+    "chunking": "️ Chunking text",
+    "dedup": "️ Deduplicating chunks",
+    "embedding": "Embedding chunks",
+    "storing": "️ Storing embeddings",
+    "saving_cache": "Persisting cache",
 }
 
 def render_response_details(metadata: Dict[str, Any]) -> None:
@@ -206,11 +206,11 @@ def render_response_details(metadata: Dict[str, Any]) -> None:
     if count is None:
         count = len(chunks)
 
-    st.markdown(f"**Retrieved chunks ({count})** — use these to verify grounding.")
+    st.markdown(f"**Retrieved chunks ({count})** - use these to verify grounding.")
     if not chunks:
         st.warning(
             "No chunks were retrieved for this query. The answer could not have been grounded "
-            "in your documents — anything the model said came from its training data."
+            "in your documents - anything the model said came from its training data."
         )
     else:
         for idx, chunk in enumerate(chunks, start=1):
@@ -236,12 +236,12 @@ def render_response_details(metadata: Dict[str, Any]) -> None:
 
 
 CHAT_STAGE_LABELS = {
-    "validating": "🔒 Validating input",
-    "analyzing": "🧠 Analyzing query",
-    "retrieving": "📚 Retrieving relevant context",
-    "context": "🧵 Loading conversation context",
-    "generating": "✍️ Generating answer",
-    "done": "✅ Done",
+    "validating": "Validating input",
+    "analyzing": "Analyzing query",
+    "retrieving": "Retrieving relevant context",
+    "context": "Loading conversation context",
+    "generating": "️ Generating answer",
+    "done": "Done",
 }
 
 
@@ -260,10 +260,10 @@ def process_uploaded_document(uploaded_file):
 
         import time as _time
         start = _time.time()
-        with st.sidebar.status(f"⏳ Ingesting {safe_name}…", expanded=True) as ingest_status:
+        with st.sidebar.status(f"Ingesting {safe_name}…", expanded=True) as ingest_status:
             with open(file_path, "wb") as f:
                 f.write(uploaded_file.read())
-            ingest_status.write("📥 Wrote upload to disk")
+            ingest_status.write("Wrote upload to disk")
 
             progress_bar = st.sidebar.progress(0.0, text="Waiting for server")
             success = False
@@ -296,7 +296,7 @@ def process_uploaded_document(uploaded_file):
             elapsed = _time.time() - start
             progress_bar.progress(1.0 if success else 0.0, text="Done" if success else "Failed")
             ingest_status.update(
-                label=f"{'✅ Ingest complete' if success else '❌ Ingest failed'} · {elapsed:.1f}s",
+                label=f"{' Ingest complete' if success else ' Ingest failed'} · {elapsed:.1f}s",
                 state="complete" if success else "error",
             )
 
@@ -339,7 +339,7 @@ def process_uploaded_directory(directory: str):
     try:
         import time as _time
         start = _time.time()
-        with st.sidebar.status(f"⏳ Ingesting {directory}…", expanded=True) as ingest_status:
+        with st.sidebar.status(f"Ingesting {directory}…", expanded=True) as ingest_status:
             progress_bar = st.sidebar.progress(0.0, text="Waiting for server")
             success = False
             message = ""
@@ -371,7 +371,7 @@ def process_uploaded_directory(directory: str):
             elapsed = _time.time() - start
             progress_bar.progress(1.0 if success else 0.0, text="Done" if success else "Failed")
             ingest_status.update(
-                label=f"{'✅ Directory ingested' if success else '❌ Ingest failed'} · {elapsed:.1f}s",
+                label=f"{' Directory ingested' if success else ' Ingest failed'} · {elapsed:.1f}s",
                 state="complete" if success else "error",
             )
 
@@ -433,7 +433,7 @@ def export_chat_history():
 
 def main_interface():
     """Main chat interface."""
-    st.title("🤖 Final RAG Chatbot")
+    st.title("Final RAG Chatbot")
     st.markdown(f"**Current Role:** {st.session_state.current_role} | **MCP Enabled:** {st.session_state.mcp_enabled}")
     
     # Display system status
@@ -485,14 +485,14 @@ def main_interface():
         with st.chat_message("user"):
             st.write(prompt)
         
-        # Generate response — real MCP progress notifications drive the status.
+        # Generate response - real MCP progress notifications drive the status.
         # The status panel sits above the answer; the answer (streamed or
         # one-shot) is rendered as its own block in the chat bubble so it
         # never gets nested inside a collapsing status.
         with st.chat_message("assistant"):
             import time as _time
             start = _time.time()
-            chat_status = st.status("🤖 Thinking…", expanded=True)
+            chat_status = st.status("Thinking…", expanded=True)
             response = None
             last_stage = ""
 
@@ -521,7 +521,7 @@ def main_interface():
                 )
                 response_time = _time.time() - start
                 chat_status.update(
-                    label=f"✅ Answer ready · {response_time:.1f}s",
+                    label=f"Answer ready · {response_time:.1f}s",
                     state="complete",
                 )
 
@@ -565,7 +565,7 @@ def main_interface():
                 run_async(run_with_progress())
                 response_time = _time.time() - start
                 chat_status.update(
-                    label=f"✅ Answer ready · {response_time:.1f}s",
+                    label=f"Answer ready · {response_time:.1f}s",
                     state="complete",
                 )
                 st.markdown(response["content"])
@@ -591,7 +591,7 @@ async def generate_response(prompt: str, progress_callback=None) -> Dict[str, An
                 "timestamp": datetime.now().isoformat()
             }
 
-        # Generate response — progress notifications drive the UI status
+        # Generate response - progress notifications drive the UI status
         response_text = await rag_system.chat(prompt, progress_callback=progress_callback)
         
         # Get additional metadata
@@ -630,7 +630,7 @@ async def generate_response(prompt: str, progress_callback=None) -> Dict[str, An
 
 def analytics_tab():
     """Analytics and monitoring tab."""
-    st.header("📊 System Analytics")
+    st.header("System Analytics")
     
     if st.button("Refresh Analytics"):
         run_async(update_system_stats())
@@ -668,7 +668,7 @@ def analytics_tab():
 
 def documents_tab():
     """Document management tab."""
-    st.header("📄 Document Management")
+    st.header("Document Management")
     
     if st.button("Refresh Document List"):
         run_async(load_document_list())
@@ -704,7 +704,7 @@ def main():
     init_session_state()
     
     # Create tabs
-    tab1, tab2, tab3 = st.tabs(["💬 Chat", "📊 Analytics", "📄 Documents"])
+    tab1, tab2, tab3 = st.tabs(["Chat", "Analytics", "Documents"])
     
     # Sidebar
     sidebar()

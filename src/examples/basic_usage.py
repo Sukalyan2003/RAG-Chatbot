@@ -15,7 +15,7 @@ from examples.example_utils import ensure_sample_documents, response_to_text
 
 def basic_example():
     """Basic usage example."""
-    print("🤖 Basic RAG Chatbot Example")
+    print(" Basic RAG Chatbot Example")
     print("-" * 40)
     
     try:
@@ -42,17 +42,17 @@ def basic_example():
             "Compare supervised and unsupervised learning"
         ]
         
-        print("\n📝 Asking sample questions...")
+        print("\n Asking sample questions...")
         print("=" * 50)
         
         for question in sample_questions:
-            print(f"\n❓ Question: {question}")
+            print(f"\n Question: {question}")
             response = response_to_text(chatbot.chat(question, stream=False))
-            print(f"🤖 Answer: {response}")
+            print(f" Answer: {response}")
             print("-" * 30)
         
         # Show statistics
-        print("\n📊 System Statistics:")
+        print("\n System Statistics:")
         stats = chatbot.get_stats()
         for key, value in stats.items():
             print(f"   {key}: {value}")
@@ -63,7 +63,7 @@ def basic_example():
 
 def interactive_example():
     """Interactive usage example."""
-    print("🎮 Interactive RAG Chatbot Example")
+    print(" Interactive RAG Chatbot Example")
     print("-" * 40)
     
     try:
@@ -80,7 +80,7 @@ def interactive_example():
             
             while True:
                 try:
-                    question = input("\n❓ Your question: ").strip()
+                    question = input("\n Your question: ").strip()
                     
                     if question.lower() in ['quit', 'exit', 'bye']:
                         break
@@ -90,7 +90,7 @@ def interactive_example():
                         continue
                     
                     response = response_to_text(chatbot.chat(question, stream=False))
-                    print(f"🤖 Answer: {response}")
+                    print(f" Answer: {response}")
                     
                 except KeyboardInterrupt:
                     print("\n\nGoodbye!")
@@ -105,13 +105,13 @@ def interactive_example():
 
 def role_based_example():
     """Example showing role-based access."""
-    print("👥 Role-based Access Example")
+    print(" Role-based Access Example")
     print("-" * 40)
     
     roles = ["Guest", "User", "Admin"]
     
     for role in roles:
-        print(f"\n🎭 Testing as {role}:")
+        print(f"\n Testing as {role}:")
         
         try:
             with FinalRAGChatbot(role=role) as chatbot:

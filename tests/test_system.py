@@ -673,11 +673,11 @@ class SystemTests(unittest.TestCase):
                 "auto_tune": True,
                 "ollama_env": {
                     "keep_alive": "auto",
-                    "kv_cache_type": "q4_0",   # explicit — must not be overridden
+                    "kv_cache_type": "q4_0",   # explicit - must not be overridden
                     "num_gpu": "auto",
                 },
             },
-            "llm": {"num_ctx": 1024},           # explicit — must not be overridden
+            "llm": {"num_ctx": 1024},           # explicit - must not be overridden
         }
 
         with patch("core.utils.detect_hardware", return_value={

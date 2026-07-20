@@ -6,7 +6,7 @@ The Model Context Protocol (MCP) layer exposes the RAG system as a JSON-RPC 2.0 
 
 - A versioned protocol (`2024-11-05`) with `initialize`, `tools/list`, `tools/call`, `resources/list`, `resources/read`, `prompts/list`, and `prompts/get`.
 - Seven tools (`chat`, `load_documents`, `search_documents`, `analyze_query`, `get_stats`, `clear_conversation`, `clear_documents`).
-- `notifications/progress` events for the long-running tools (`chat`, `load_documents`) when the caller supplies `_meta.progressToken` — see [Progress notifications](#progress-notifications) below.
+- `notifications/progress` events for the long-running tools (`chat`, `load_documents`) when the caller supplies `_meta.progressToken` - see [Progress notifications](#progress-notifications) below.
 - Resources for conversation history (per role), the live config, and the document index.
 - A `system_prompt` prompt template that returns the role-conditioned system prompt the chatbot uses internally.
 - An async Python client (`MCPClient`) with a persistent reader that demuxes responses from progress notifications, and a higher-level wrapper (`MCPIntegratedRAG`) for in-process usage.
@@ -50,7 +50,7 @@ python launch_mcp_server.py --config config/config.json --log-level INFO
 # Or invoke the server directly
 python src/mcp/mcp_server.py --config config/config.json
 
-# Windows / PowerShell — server + Streamlit
+# Windows / PowerShell - server + Streamlit
 .\start_mcp.ps1
 .\start_mcp.ps1 -ServerOnly
 .\start_mcp.ps1 -StreamlitOnly
@@ -66,9 +66,9 @@ Logs go to stderr; stdout is reserved for JSON-RPC frames so a misbehaving log l
 | `load_documents` | `source` | `role` (default `Admin`), `document_type` (`auto` default) | Human-readable load summary. |
 | `search_documents` | `query` | `role`, `max_results` (5), `threshold` (0.3) | JSON list of `{content, source, score, metadata}` (content truncated to 500 chars). |
 | `analyze_query` | `query` | `role` | JSON analysis dict from `QueryAnalyzer.analyze_query`. |
-| `get_stats` | — | `role` | JSON with counters, uptime, doc/chunk counts, last error. |
-| `clear_conversation` | — | `role` | Confirmation string. |
-| `clear_documents` | — | `role` (default `Admin`), `delete_cache` (true) | JSON with `documents_loaded`, `chunks_loaded`, `cache_deleted`, `cache_path`. |
+| `get_stats` | - | `role` | JSON with counters, uptime, doc/chunk counts, last error. |
+| `clear_conversation` | - | `role` | Confirmation string. |
+| `clear_documents` | - | `role` (default `Admin`), `delete_cache` (true) | JSON with `documents_loaded`, `chunks_loaded`, `cache_deleted`, `cache_path`. |
 
 ## Progress notifications
 
@@ -108,7 +108,7 @@ The server then emits zero or more notifications before the final response:
 | `load_documents` | `reading`, `chunking`, `dedup`, `embedding`, `storing`, `saving_cache` |
 | `chat` | `validating`, `analyzing`, `retrieving`, `context`, `generating`, `done` |
 
-The bundled `MCPClient` handles tokens internally — pass `progress_callback=(stage, current, total) -> None` to `chat` or `load_documents` and the persistent reader will route notifications to your callback.
+The bundled `MCPClient` handles tokens internally - pass `progress_callback=(stage, current, total) -> None` to `chat` or `load_documents` and the persistent reader will route notifications to your callback.
 
 ```python
 def on_progress(stage, current, total):
@@ -193,11 +193,11 @@ If the client uses a different schema (top-level `mcp.servers` vs `mcpServers`, 
 
 ## Troubleshooting
 
-- **Server exits immediately** — run `python src/mcp/mcp_server.py --log-level DEBUG` and watch stderr; the most common cause is an unreachable Ollama service.
-- **Client hangs** — verify the server prints nothing to stdout except JSON-RPC. The client tolerates accidental log lines but a flood will look like a hang.
-- **`Method not found`** — check the spelling against the table above; only those methods are routed.
-- **Tool call returns "Error: Query parameter is required"** — confirm the `arguments` object includes the required field; some clients drop empty strings before sending.
-- **Bypass the server in tests** — set `use_mcp=False` on `MCPIntegratedRAG`; it falls back to a direct in-process `FinalRAGChatbot`.
+- **Server exits immediately** - run `python src/mcp/mcp_server.py --log-level DEBUG` and watch stderr; the most common cause is an unreachable Ollama service.
+- **Client hangs** - verify the server prints nothing to stdout except JSON-RPC. The client tolerates accidental log lines but a flood will look like a hang.
+- **`Method not found`** - check the spelling against the table above; only those methods are routed.
+- **Tool call returns "Error: Query parameter is required"** - confirm the `arguments` object includes the required field; some clients drop empty strings before sending.
+- **Bypass the server in tests** - set `use_mcp=False` on `MCPIntegratedRAG`; it falls back to a direct in-process `FinalRAGChatbot`.
 
 ## Examples
 

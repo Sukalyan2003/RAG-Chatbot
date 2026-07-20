@@ -100,7 +100,7 @@ class FinalRAGChatbot:
 
         # Auto-tune Ollama settings to the detected hardware (VRAM tier
         # picks num_ctx + KV cache type + GPU offload). User-set values in
-        # config always win — auto-detection only fills gaps marked
+        # config always win - auto-detection only fills gaps marked
         # "auto" or left out entirely. Disable with system.auto_tune=false.
         tuning = resolve_ollama_tuning(self.config)
         self.config["llm"]["num_ctx"] = tuning["num_ctx"]
@@ -609,14 +609,14 @@ class FinalRAGChatbot:
     def _create_system_prompt(self, role_config: Dict) -> str:
         """Create system prompt based on role configuration."""
         base_prompt = f"""
-        You are a helpful AI assistant with access to a knowledge base. 
+        You are a helpful assistant with access to a knowledge base. 
         Your role permissions: {', '.join(role_config.get('permissions', []))}
         Response style: {role_config.get('response_length', 'concise')}
         
         Guidelines:
         - Answer ONLY from the provided context. Do not supplement with general knowledge, training data, encyclopedic background, or "standard" definitions.
         - If the context does not contain enough information to answer the question, reply exactly: "The provided documents do not cover this." and stop. Do not guess, do not fall back to general knowledge, and do not add a disclaimer pointing to outside sources.
-        - Never write phrases like "based on general knowledge", "as per standard principles", "according to NIST/ISO/textbooks", or similar — if it isn't in the context, it doesn't belong in the answer.
+        - Never write phrases like "based on general knowledge", "as per standard principles", "according to NIST/ISO/textbooks", or similar - if it isn't in the context, it doesn't belong in the answer.
         - But you can interpret the knowledge in the documents and connect the dots between them to answer questions, as long as you don't introduce unsupported information.
         - Keep responses professional and respectful.
         - Use readable Markdown: short paragraphs, bullet lists, and tables when helpful.
@@ -805,7 +805,7 @@ def main():
             
             # Interactive mode
             if args.interactive:
-                print(f"\n🤖 Final RAG Chatbot ({args.role} mode)")
+                print(f"\nFinal RAG Chatbot ({args.role} mode)")
                 print("Type 'quit' to exit, 'stats' for statistics, 'clear' to clear conversation")
                 print("-" * 50)
                 
@@ -827,7 +827,7 @@ def main():
                         
                         if query:
                             response = chatbot.chat(query)
-                            print(f"\n🤖 Chatbot: {response}")
+                            print(f"\nChatbot: {response}")
                         
                     except KeyboardInterrupt:
                         print("\n\nGoodbye!")

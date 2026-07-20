@@ -30,7 +30,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 # Configure Streamlit page
 st.set_page_config(
     page_title="Final RAG Chatbot System",
-    page_icon="🤖",
+    page_icon="",
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -48,7 +48,7 @@ st.markdown("""
         -webkit-text-fill-color: transparent;
     }
     
-    /* Cards have a fixed light background, so pin a dark foreground too —
+    /* Cards have a fixed light background, so pin a dark foreground too -
        otherwise dark themes render light-on-light and the text disappears. */
     .status-card {
         background-color: #f0f2f6;
@@ -158,7 +158,7 @@ class StreamlitRAGApp:
 
         Earlier versions ran the full ``run_comprehensive_tests`` here,
         which both eagerly imported ``sentence_transformers`` (pulling in
-        torch/torchvision) and instantiated a full ``FinalRAGChatbot`` —
+        torch/torchvision) and instantiated a full ``FinalRAGChatbot`` -
         loading the embeddings cache before the first frame rendered. We
         now defer both to the System Tests page and use ``find_spec`` so
         startup is bounded by config parsing, not model loading.
@@ -220,7 +220,7 @@ class StreamlitRAGApp:
             }
 
         # Dependencies: presence-only check, so we don't drag in torchvision.
-        # sentence_transformers is treated as optional — only required when
+        # sentence_transformers is treated as optional - only required when
         # the configured embedding provider asks for it.
         required_deps = ['sklearn', 'numpy', 'pandas', 'requests']
         missing_deps = [m for m in required_deps if importlib.util.find_spec(m) is None]
@@ -309,44 +309,44 @@ class StreamlitRAGApp:
     
     def render_header(self):
         """Render the main application header."""
-        st.markdown('<h1 class="main-header">🤖 Final RAG Chatbot System</h1>', unsafe_allow_html=True)
+        st.markdown('<h1 class="main-header"> Final RAG Chatbot System</h1>', unsafe_allow_html=True)
         
         # System status indicator
         col1, col2, col3 = st.columns([1, 2, 1])
         with col2:
             status = st.session_state.test_results.get('overall_status', 'unknown')
             if status == 'passed':
-                st.success("✅ System Status: All systems operational")
+                st.success(" System Status: All systems operational")
             elif status == 'failed':
-                st.error("❌ System Status: Issues detected")
+                st.error(" System Status: Issues detected")
             elif status == 'partial':
-                st.warning("⚠️ System Status: Partial functionality")
+                st.warning("️ System Status: Partial functionality")
             else:
-                st.info("🔄 System Status: Checking...")
+                st.info(" System Status: Checking...")
     
     def render_sidebar(self):
         """Render the sidebar navigation."""
-        st.sidebar.title("🎛️ Navigation")
+        st.sidebar.title("️ Navigation")
         
         # Page selection
         page = st.sidebar.selectbox(
             "Select Page",
             [
-                "🏠 Dashboard",
-                "💬 Chat Interface", 
-                "📚 Document Management",
-                "👥 Role Management",
-                "⚙️ Configuration",
-                "📊 Analytics",
-                "🧪 System Tests",
-                "📤 Export Center"
+                " Dashboard",
+                " Chat Interface", 
+                " Document Management",
+                " Role Management",
+                "️ Configuration",
+                " Analytics",
+                " System Tests",
+                " Export Center"
             ]
         )
         
         st.sidebar.markdown("---")
         
         # Role selector
-        st.sidebar.subheader("👤 Current Role")
+        st.sidebar.subheader(" Current Role")
         new_role = st.sidebar.selectbox(
             "Role",
             ["User", "Expert", "Admin"],
@@ -361,7 +361,7 @@ class StreamlitRAGApp:
         st.sidebar.markdown("---")
         
         # Quick stats
-        st.sidebar.subheader("📊 Quick Stats")
+        st.sidebar.subheader(" Quick Stats")
         if st.session_state.chatbot_instance:
             try:
                 stats = st.session_state.chatbot_instance.get_stats()
@@ -378,34 +378,34 @@ class StreamlitRAGApp:
     
     def render_dashboard(self):
         """Render the main dashboard page."""
-        st.header("🏠 System Dashboard")
+        st.header("System Dashboard")
 
-        # System overview — use native metrics for a clean look that adapts
+        # System overview - use native metrics for a clean look that adapts
         # to dark mode automatically.
         c1, c2, c3, c4 = st.columns(4)
         c1.metric(
             "System Status",
-            "✅ Operational" if st.session_state.system_initialized else "❌ Issues",
+            " Operational" if st.session_state.system_initialized else " Issues",
         )
-        c2.metric("Documents", f"📚 {len(st.session_state.loaded_documents)}")
-        c3.metric("Conversation", f"💬 {len(st.session_state.chat_history)} msgs")
-        c4.metric("Current Role", f"👤 {st.session_state.current_role}")
+        c2.metric("Documents", f" {len(st.session_state.loaded_documents)}")
+        c3.metric("Conversation", f" {len(st.session_state.chat_history)} msgs")
+        c4.metric("Current Role", f" {st.session_state.current_role}")
 
         st.divider()
 
         # Test results summary
-        st.subheader("🧪 System Test Results")
+        st.subheader("System Test Results")
         test_results = st.session_state.test_results
 
         for test_name, result in test_results.items():
             if test_name == 'overall_status':
                 continue
             status_icon = {
-                'passed': '✅',
-                'failed': '❌',
-                'running': '🔄',
+                'passed': '',
+                'failed': '',
+                'running': '',
                 'skipped': '⏭️',
-            }.get(result['status'], '❓')
+            }.get(result['status'], '')
             with st.expander(f"{status_icon} {test_name.replace('_', ' ').title()}"):
                 st.write(f"**Status:** {result['status']}")
                 st.write(f"**Details:** {result['details']}")
@@ -413,19 +413,19 @@ class StreamlitRAGApp:
         st.divider()
 
         # Quick actions
-        st.subheader("🚀 Quick Actions")
+        st.subheader(" Quick Actions")
         col1, col2, col3 = st.columns(3)
         with col1:
-            if st.button("🔄 Re-run Tests", width="stretch"):
+            if st.button(" Re-run Tests", width="stretch"):
                 with st.spinner("Running full tests…"):
                     st.session_state.test_results = self.run_comprehensive_tests()
                 st.rerun()
         with col2:
-            if st.button("💬 Start Chat", width="stretch"):
+            if st.button(" Start Chat", width="stretch"):
                 st.session_state.current_page = "Chat Interface"
                 st.rerun()
         with col3:
-            if st.button("📚 Load Documents", width="stretch"):
+            if st.button(" Load Documents", width="stretch"):
                 st.session_state.current_page = "Document Management"
                 st.rerun()
     
@@ -441,7 +441,7 @@ class StreamlitRAGApp:
         ):
             return True
         try:
-            with st.spinner("Loading RAG engine — first open reads the embeddings cache…"):
+            with st.spinner("Loading RAG engine - first open reads the embeddings cache…"):
                 from core.final_rag_system import FinalRAGChatbot
                 st.session_state.chatbot_instance = FinalRAGChatbot(
                     role=st.session_state.current_role
@@ -449,19 +449,19 @@ class StreamlitRAGApp:
                 st.session_state.system_initialized = True
             return True
         except Exception as e:
-            st.error(f"❌ Failed to initialize chatbot: {e}")
+            st.error(f" Failed to initialize chatbot: {e}")
             return False
 
     def render_chat_interface(self):
         """Render the chat interface page using Streamlit-native widgets."""
-        st.header("💬 Chat Interface")
+        st.header(" Chat Interface")
 
         if not self._ensure_chatbot():
             return
 
         chatbot = st.session_state.chatbot_instance
 
-        # Top metrics row — same shape as the MCP UI.
+        # Top metrics row - same shape as the MCP UI.
         stats = chatbot.get_stats() if chatbot else {}
         total = stats.get("queries_processed", 0)
         successful = stats.get("successful_responses", 0)
@@ -474,26 +474,26 @@ class StreamlitRAGApp:
         c3.metric("Success Rate", f"{success_rate:.1f}%")
         c4.metric("Errors", stats.get("errors", 0))
 
-        with st.expander("📊 Full stats (JSON)"):
+        with st.expander(" Full stats (JSON)"):
             st.json(stats)
 
         # Controls row.
         ctrl1, ctrl2, ctrl3 = st.columns([3, 1, 1])
         with ctrl1:
             st.caption(
-                f"👤 **{st.session_state.current_role}** · "
+                f" **{st.session_state.current_role}** · "
                 f"streaming controlled by `system.enable_streaming` in config"
             )
         with ctrl2:
             stream_mode = st.toggle(
-                "🔄 Stream",
+                " Stream",
                 value=st.session_state.config.get("system", {}).get(
                     "enable_streaming", False
                 ),
                 help="Render tokens progressively as the model generates them.",
             )
         with ctrl3:
-            if st.button("🗑️ Clear", width="stretch"):
+            if st.button("️ Clear", width="stretch"):
                 st.session_state.chat_history = []
                 if chatbot:
                     chatbot.clear_conversation()
@@ -508,9 +508,9 @@ class StreamlitRAGApp:
                 st.markdown(message["content"])
                 sources = message.get("sources") or []
                 if sources:
-                    st.caption(f"📚 Sources: {', '.join(sources[:3])}")
+                    st.caption(f" Sources: {', '.join(sources[:3])}")
 
-        # Chat input — single-line, submit on Enter, fixed to the bottom.
+        # Chat input - single-line, submit on Enter, fixed to the bottom.
         if user_input := st.chat_input("Ask me anything about your documents…"):
             self._handle_chat_turn(user_input, stream_mode)
 
@@ -518,7 +518,7 @@ class StreamlitRAGApp:
         """Run one chat turn with status + optional streaming render."""
         chatbot = st.session_state.chatbot_instance
         if chatbot is None:
-            st.error("❌ Chatbot not initialized. Please check system status.")
+            st.error(" Chatbot not initialized. Please check system status.")
             return
 
         # Echo the user's message immediately and persist it.
@@ -529,17 +529,17 @@ class StreamlitRAGApp:
             st.markdown(user_input)
 
         stage_labels = {
-            "validating": "🔒 Validating input",
-            "analyzing": "🧠 Analyzing query",
-            "retrieving": "📚 Retrieving relevant context",
-            "context": "🧵 Loading conversation context",
-            "generating": "✍️ Generating answer",
-            "done": "✅ Done",
+            "validating": "Validating input",
+            "analyzing": "Analyzing query",
+            "retrieving": "Retrieving relevant context",
+            "context": "Loading conversation context",
+            "generating": "️ Generating answer",
+            "done": "Done",
         }
         start_time = time.time()
 
         with st.chat_message("assistant"):
-            chat_status = st.status("🤖 Thinking…", expanded=True)
+            chat_status = st.status("Thinking…", expanded=True)
             last_stage = ""
 
             def on_progress(stage, current, total):
@@ -571,7 +571,7 @@ class StreamlitRAGApp:
 
                 response_time = time.time() - start_time
                 chat_status.update(
-                    label=f"✅ Answer ready · {response_time:.1f}s",
+                    label=f"Answer ready · {response_time:.1f}s",
                     state="complete",
                 )
 
@@ -593,8 +593,8 @@ class StreamlitRAGApp:
                     }
                 )
             except Exception as e:
-                chat_status.update(label=f"❌ Error: {e}", state="error")
-                st.error(f"❌ Error generating response: {e}")
+                chat_status.update(label=f" Error: {e}", state="error")
+                st.error(f" Error generating response: {e}")
                 st.session_state.chat_history.append(
                     {
                         "type": "bot",
@@ -605,10 +605,10 @@ class StreamlitRAGApp:
     
     def render_document_management(self):
         """Render the document management page."""
-        st.header("📚 Document Management")
+        st.header("Document Management")
         
         # Document upload section
-        st.subheader("📤 Upload Documents")
+        st.subheader(" Upload Documents")
         
         uploaded_files = st.file_uploader(
             "Choose files to upload",
@@ -623,12 +623,12 @@ class StreamlitRAGApp:
                 ["auto", "pdf", "txt", "json", "csv", "web"]
             )
         with col2:
-            process_button = st.button("🔄 Process Documents", width="stretch")
+            process_button = st.button(" Process Documents", width="stretch")
         
         # Process uploaded files
         if process_button and uploaded_files:
             if not st.session_state.chatbot_instance:
-                st.error("❌ Please initialize the chatbot first in the Chat Interface.")
+                st.error(" Please initialize the chatbot first in the Chat Interface.")
                 return
             
             try:
@@ -636,7 +636,7 @@ class StreamlitRAGApp:
                 temp_dir = Path("temp_uploads")
                 temp_dir.mkdir(exist_ok=True)
 
-                with st.status("📥 Ingesting documents…", expanded=True) as ingest_status:
+                with st.status(" Ingesting documents…", expanded=True) as ingest_status:
                     save_progress = st.progress(0, text="Saving uploads")
                     saved_files = []
                     for i, uploaded_file in enumerate(uploaded_files):
@@ -653,12 +653,12 @@ class StreamlitRAGApp:
                     encode_progress = st.progress(0, text="Waiting to start encoding")
 
                     stage_labels = {
-                        "reading": "📖 Reading files",
-                        "chunking": "✂️ Chunking text",
-                        "dedup": "♻️ Deduplicating chunks",
-                        "embedding": "🧬 Embedding chunks",
-                        "storing": "🗄️ Storing embeddings",
-                        "saving_cache": "💾 Persisting cache",
+                        "reading": "Reading files",
+                        "chunking": "️ Chunking text",
+                        "dedup": "️ Deduplicating chunks",
+                        "embedding": "Embedding chunks",
+                        "storing": "️ Storing embeddings",
+                        "saving_cache": "Persisting cache",
                     }
 
                     def on_load_progress(stage, current, total):
@@ -676,7 +676,7 @@ class StreamlitRAGApp:
                             ingest_status.update(label=label)
                             ingest_status.write(label)
 
-                    ingest_status.update(label="📖 Processing documents…")
+                    ingest_status.update(label=" Processing documents…")
                     success = st.session_state.chatbot_instance.load_documents(
                         str(temp_dir),
                         document_type,
@@ -684,12 +684,12 @@ class StreamlitRAGApp:
                     )
                     encode_progress.progress(1.0, text="Encoding complete")
                     ingest_status.update(
-                        label="✅ Documents ingested" if success else "❌ Ingest failed",
+                        label=" Documents ingested" if success else " Ingest failed",
                         state="complete" if success else "error",
                     )
                 
                 if success:
-                    st.success(f"✅ Successfully processed {len(uploaded_files)} documents!")
+                    st.success(f" Successfully processed {len(uploaded_files)} documents!")
                     st.session_state.loaded_documents.extend([f.name for f in uploaded_files])
                     
                     # Update document stats
@@ -699,61 +699,61 @@ class StreamlitRAGApp:
                         'types_processed': list(set([f.name.split('.')[-1] for f in uploaded_files]))
                     }
                 else:
-                    st.error("❌ Failed to process documents. Check logs for details.")
+                    st.error(" Failed to process documents. Check logs for details.")
                 
                 # Cleanup temp files
                 import shutil
                 shutil.rmtree(temp_dir)
                 
             except Exception as e:
-                st.error(f"❌ Error processing documents: {e}")
+                st.error(f" Error processing documents: {e}")
         
         # Web URL processing
-        st.subheader("🌐 Process Web Content")
+        st.subheader(" Process Web Content")
         col1, col2 = st.columns([3, 1])
         with col1:
             web_url = st.text_input("Enter URL:", placeholder="https://example.com/article")
         with col2:
-            web_process_button = st.button("🔄 Process URL")
+            web_process_button = st.button(" Process URL")
         
         if web_process_button and web_url:
             if not st.session_state.chatbot_instance:
-                st.error("❌ Please initialize the chatbot first.")
+                st.error(" Please initialize the chatbot first.")
                 return
             
-            with st.spinner("🌐 Processing web content..."):
+            with st.spinner(" Processing web content..."):
                 try:
                     success = st.session_state.chatbot_instance.load_documents(web_url, "web")
                     if success:
-                        st.success(f"✅ Successfully processed content from {web_url}")
+                        st.success(f" Successfully processed content from {web_url}")
                         st.session_state.loaded_documents.append(web_url)
                     else:
-                        st.error("❌ Failed to process web content.")
+                        st.error(" Failed to process web content.")
                 except Exception as e:
-                    st.error(f"❌ Error processing web content: {e}")
+                    st.error(f" Error processing web content: {e}")
         
         # Document library
-        st.subheader("📖 Document Library")
+        st.subheader("Document Library")
         
         if st.session_state.loaded_documents:
             # Display loaded documents
             for i, doc in enumerate(st.session_state.loaded_documents):
                 col1, col2, col3 = st.columns([3, 1, 1])
                 with col1:
-                    st.text(f"📄 {doc}")
+                    st.text(f" {doc}")
                 with col2:
                     doc_type = doc.split('.')[-1] if '.' in doc else 'web'
                     st.text(f"Type: {doc_type}")
                 with col3:
-                    if st.button(f"🗑️ Remove", key=f"remove_{i}"):
+                    if st.button(f"️ Remove", key=f"remove_{i}"):
                         st.session_state.loaded_documents.remove(doc)
                         st.rerun()
         else:
-            st.info("📭 No documents loaded yet. Upload some files to get started!")
+            st.info(" No documents loaded yet. Upload some files to get started!")
         
         # Document statistics
         if st.session_state.document_stats:
-            st.subheader("📊 Document Statistics")
+            st.subheader("Document Statistics")
             stats = st.session_state.document_stats
             
             col1, col2, col3 = st.columns(3)
@@ -768,10 +768,10 @@ class StreamlitRAGApp:
     
     def render_analytics(self):
         """Render the analytics dashboard."""
-        st.header("📊 Analytics Dashboard")
+        st.header(" Analytics Dashboard")
         
         if not st.session_state.performance_data:
-            st.info("📊 No performance data available yet. Start chatting to generate analytics!")
+            st.info(" No performance data available yet. Start chatting to generate analytics!")
             return
         
         # Convert performance data to DataFrame
@@ -817,7 +817,7 @@ class StreamlitRAGApp:
         
         # Role distribution
         if 'role' in df.columns:
-            st.subheader("👥 Usage by Role")
+            st.subheader("Usage by Role")
             role_counts = df['role'].value_counts()
             
             fig_roles = px.pie(
@@ -828,7 +828,7 @@ class StreamlitRAGApp:
             st.plotly_chart(fig_roles, width="stretch")
         
         # Response time distribution
-        st.subheader("📈 Response Time Distribution")
+        st.subheader("Response Time Distribution")
         fig_hist = px.histogram(
             df,
             x='response_time',
@@ -839,28 +839,28 @@ class StreamlitRAGApp:
         st.plotly_chart(fig_hist, width="stretch")
         
         # Raw data
-        with st.expander("📋 Raw Performance Data"):
+        with st.expander("Raw Performance Data"):
             st.dataframe(df)
     
     def render_system_tests(self):
         """Render the system tests page."""
-        st.header("🧪 System Tests")
+        st.header("System Tests")
         
         # Test controls
         col1, col2, col3 = st.columns(3)
         with col1:
-            if st.button("🔄 Run All Tests", width="stretch"):
+            if st.button(" Run All Tests", width="stretch"):
                 with st.spinner("Running comprehensive tests..."):
                     st.session_state.test_results = self.run_comprehensive_tests()
                     st.rerun()
         
         with col2:
-            if st.button("🧹 Clear Test Results", width="stretch"):
+            if st.button(" Clear Test Results", width="stretch"):
                 st.session_state.test_results = {}
                 st.rerun()
         
         with col3:
-            if st.button("📊 System Info", width="stretch"):
+            if st.button(" System Info", width="stretch"):
                 st.info(f"""
                 **Python Version:** {sys.version}
                 **Working Directory:** {os.getcwd()}
@@ -869,7 +869,7 @@ class StreamlitRAGApp:
         
         # Test results display
         if st.session_state.test_results:
-            st.subheader("📋 Test Results")
+            st.subheader("Test Results")
             
             for test_name, result in st.session_state.test_results.items():
                 if test_name == 'overall_status':
@@ -880,11 +880,11 @@ class StreamlitRAGApp:
                 
                 # Color code based on status
                 if status == 'passed':
-                    st.success(f"✅ **{test_name.replace('_', ' ').title()}**")
+                    st.success(f" **{test_name.replace('_', ' ').title()}**")
                 elif status == 'failed':
-                    st.error(f"❌ **{test_name.replace('_', ' ').title()}**")
+                    st.error(f" **{test_name.replace('_', ' ').title()}**")
                 elif status == 'running':
-                    st.info(f"🔄 **{test_name.replace('_', ' ').title()}**")
+                    st.info(f" **{test_name.replace('_', ' ').title()}**")
                 else:
                     st.warning(f"⏭️ **{test_name.replace('_', ' ').title()}**")
                 
@@ -892,21 +892,21 @@ class StreamlitRAGApp:
                 st.markdown("---")
         
         # Manual test options
-        st.subheader("🔧 Manual Tests")
+        st.subheader(" Manual Tests")
         
         # Test basic chat functionality
-        if st.button("💬 Test Basic Chat"):
+        if st.button(" Test Basic Chat"):
             try:
                 from core.final_rag_system import FinalRAGChatbot
                 chatbot = FinalRAGChatbot(role="User")
                 response = chatbot.chat("Hello, can you help me?")
-                st.success(f"✅ Chat test successful!")
+                st.success(f" Chat test successful!")
                 st.write(f"**Response:** {response}")
             except Exception as e:
-                st.error(f"❌ Chat test failed: {e}")
+                st.error(f" Chat test failed: {e}")
         
         # Test document processing
-        if st.button("📄 Test Document Processing"):
+        if st.button(" Test Document Processing"):
             try:
                 # Create a simple test document
                 test_content = "This is a test document for the RAG system."
@@ -918,19 +918,19 @@ class StreamlitRAGApp:
                 success = chatbot.load_documents(str(test_file))
                 
                 if success:
-                    st.success("✅ Document processing test successful!")
+                    st.success(" Document processing test successful!")
                 else:
-                    st.error("❌ Document processing test failed!")
+                    st.error(" Document processing test failed!")
                 
                 # Cleanup
                 test_file.unlink(missing_ok=True)
                 
             except Exception as e:
-                st.error(f"❌ Document processing test failed: {e}")
+                st.error(f" Document processing test failed: {e}")
         
         # Dependency checker
-        st.subheader("📦 Dependency Check")
-        if st.button("🔍 Check Dependencies"):
+        st.subheader(" Dependency Check")
+        if st.button(" Check Dependencies"):
             dependencies = [
                 ("sklearn", "Scikit-learn"),
                 ("requests", "Requests"),
@@ -944,21 +944,21 @@ class StreamlitRAGApp:
             for module, name in dependencies:
                 try:
                     __import__(module)
-                    st.success(f"✅ {name}")
+                    st.success(f" {name}")
                 except ImportError:
-                    st.error(f"❌ {name} - Not installed")
+                    st.error(f" {name} - Not installed")
     
     def render_export_center(self):
         """Render the export center page."""
-        st.header("📤 Export Center")
+        st.header("Export Center")
         
         # Chat history export
-        st.subheader("💬 Export Chat History")
+        st.subheader("Export Chat History")
         
         if st.session_state.chat_history:
             export_format = st.selectbox("Export Format", ["JSON", "CSV", "TXT"])
             
-            if st.button("📥 Export Chat History"):
+            if st.button(" Export Chat History"):
                 try:
                     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                     
@@ -981,59 +981,59 @@ class StreamlitRAGApp:
                         filename = f"chat_history_{timestamp}.txt"
                     
                     st.download_button(
-                        label=f"💾 Download {export_format} File",
+                        label=f" Download {export_format} File",
                         data=export_data,
                         file_name=filename,
                         mime="application/octet-stream"
                     )
                     
                 except Exception as e:
-                    st.error(f"❌ Export failed: {e}")
+                    st.error(f" Export failed: {e}")
         else:
-            st.info("📭 No chat history to export")
+            st.info(" No chat history to export")
         
         # Performance data export
-        st.subheader("📊 Export Performance Data")
+        st.subheader("Export Performance Data")
         
         if st.session_state.performance_data:
-            if st.button("📈 Export Performance Data"):
+            if st.button(" Export Performance Data"):
                 try:
                     df = pd.DataFrame(st.session_state.performance_data)
                     csv_data = df.to_csv(index=False)
                     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                     
                     st.download_button(
-                        label="💾 Download Performance CSV",
+                        label=" Download Performance CSV",
                         data=csv_data,
                         file_name=f"performance_data_{timestamp}.csv",
                         mime="text/csv"
                     )
                     
                 except Exception as e:
-                    st.error(f"❌ Export failed: {e}")
+                    st.error(f" Export failed: {e}")
         else:
-            st.info("📊 No performance data to export")
+            st.info(" No performance data to export")
         
         # System configuration export
-        st.subheader("⚙️ Export System Configuration")
+        st.subheader("️ Export System Configuration")
         
-        if st.button("🔧 Export Configuration"):
+        if st.button(" Export Configuration"):
             try:
                 config_data = json.dumps(st.session_state.config, indent=2)
                 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                 
                 st.download_button(
-                    label="💾 Download Configuration JSON",
+                    label=" Download Configuration JSON",
                     data=config_data,
                     file_name=f"config_backup_{timestamp}.json",
                     mime="application/json"
                 )
                 
             except Exception as e:
-                st.error(f"❌ Export failed: {e}")
+                st.error(f" Export failed: {e}")
         
         # System logs export (if available)
-        st.subheader("📋 Export System Logs")
+        st.subheader("Export System Logs")
         
         logs_dir = Path("data/logs")
         if logs_dir.exists():
@@ -1041,37 +1041,37 @@ class StreamlitRAGApp:
             if log_files:
                 selected_log = st.selectbox("Select Log File", [f.name for f in log_files])
                 
-                if st.button("📜 Export Log File"):
+                if st.button(" Export Log File"):
                     try:
                         log_path = logs_dir / selected_log
                         log_content = log_path.read_text()
                         
                         st.download_button(
-                            label="💾 Download Log File",
+                            label=" Download Log File",
                             data=log_content,
                             file_name=selected_log,
                             mime="text/plain"
                         )
                         
                     except Exception as e:
-                        st.error(f"❌ Log export failed: {e}")
+                        st.error(f" Log export failed: {e}")
             else:
-                st.info("📭 No log files found")
+                st.info(" No log files found")
         else:
-            st.info("📭 Logs directory not found")
+            st.info(" Logs directory not found")
     
     def render_configuration(self):
         """Render the configuration management page."""
-        st.header("⚙️ Configuration Management")
+        st.header("️ Configuration Management")
         
         # Configuration editor
-        st.subheader("🔧 Edit Configuration")
+        st.subheader("Edit Configuration")
         
         # Load current config
         config = st.session_state.config
         
         # System settings
-        with st.expander("🖥️ System Settings", expanded=True):
+        with st.expander("️ System Settings", expanded=True):
             col1, col2 = st.columns(2)
             
             with col1:
@@ -1100,7 +1100,7 @@ class StreamlitRAGApp:
                 )
         
         # LLM settings
-        with st.expander("🤖 LLM Settings"):
+        with st.expander("LLM Settings"):
             col1, col2 = st.columns(2)
             
             with col1:
@@ -1136,7 +1136,7 @@ class StreamlitRAGApp:
                 )
         
         # Embedding settings
-        with st.expander("🔤 Embedding Settings"):
+        with st.expander("Embedding Settings"):
             col1, col2 = st.columns(2)
             
             with col1:
@@ -1177,7 +1177,7 @@ class StreamlitRAGApp:
                 )
         
         # Retrieval settings
-        with st.expander("🔍 Retrieval Settings"):
+        with st.expander("Retrieval Settings"):
             col1, col2 = st.columns(2)
             
             with col1:
@@ -1215,7 +1215,7 @@ class StreamlitRAGApp:
         col1, col2, col3 = st.columns(3)
         
         with col1:
-            if st.button("💾 Save Configuration", width="stretch"):
+            if st.button(" Save Configuration", width="stretch"):
                 # Update configuration
                 new_config = dict(config)
                 new_config["system"] = {
@@ -1255,26 +1255,26 @@ class StreamlitRAGApp:
                         json.dump(new_config, f, indent=2)
                     
                     st.session_state.config = new_config
-                    st.success("✅ Configuration saved successfully!")
+                    st.success(" Configuration saved successfully!")
                     
                 except Exception as e:
-                    st.error(f"❌ Failed to save configuration: {e}")
+                    st.error(f" Failed to save configuration: {e}")
         
         with col2:
-            if st.button("🔄 Reset to Defaults", width="stretch"):
+            if st.button(" Reset to Defaults", width="stretch"):
                 if st.session_state.get('confirm_reset', False):
                     # Reset logic here
                     st.info("Reset functionality would be implemented here")
                     st.session_state.confirm_reset = False
                 else:
                     st.session_state.confirm_reset = True
-                    st.warning("⚠️ Click again to confirm reset")
+                    st.warning("️ Click again to confirm reset")
         
         with col3:
-            if st.button("📤 Export Config", width="stretch"):
+            if st.button(" Export Config", width="stretch"):
                 config_json = json.dumps(st.session_state.config, indent=2)
                 st.download_button(
-                    "💾 Download Config",
+                    " Download Config",
                     config_json,
                     "config_export.json",
                     "application/json"
@@ -1297,8 +1297,8 @@ class StreamlitRAGApp:
             elif current_page == "Document Management":
                 self.render_document_management()
             elif current_page == "Role Management":
-                st.header("👥 Role Management")
-                st.info("🚧 Role management features coming soon!")
+                st.header("Role Management")
+                st.info(" Role management features coming soon!")
             elif current_page == "Configuration":
                 self.render_configuration()
             elif current_page == "Analytics":
@@ -1311,7 +1311,7 @@ class StreamlitRAGApp:
                 st.error(f"Unknown page: {current_page}")
             
         except Exception as e:
-            st.error(f"❌ Application error: {e}")
+            st.error(f" Application error: {e}")
             st.exception(e)
 
 # Main execution

@@ -200,7 +200,7 @@ class LLMInterface:
         """Build the Ollama ``options`` block.
 
         ``llm.num_ctx`` is the canonical key; ``llm.context_window`` is
-        accepted as a deprecated alias. We default to 2048 — on a 4 GB GPU
+        accepted as a deprecated alias. We default to 2048 - on a 4 GB GPU
         prefill scales linearly with context length, so paying for context
         we don't use is the most expensive thing the LLM does.
         """

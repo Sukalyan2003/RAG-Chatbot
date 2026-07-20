@@ -518,7 +518,7 @@ def _probe_gpu_vram_gb() -> float:
 
     Tries ``nvidia-smi`` first (no Python deps, fast). Returns 0.0 if the
     binary isn't on PATH or no NVIDIA GPU is present. We deliberately do
-    not import ``torch`` here — pulling torch in for a hardware probe
+    not import ``torch`` here - pulling torch in for a hardware probe
     would defeat the purpose on torch-less installs.
     """
     import subprocess
@@ -549,7 +549,7 @@ def detect_hardware() -> Dict[str, Any]:
         "cpu_count": os.cpu_count() or 0,
     }
     try:
-        import psutil  # local import — keeps utils.py import-cheap
+        import psutil  # local import - keeps utils.py import-cheap
         info["ram_gb"] = psutil.virtual_memory().total / (1024 ** 3)
     except ImportError:
         pass
@@ -587,7 +587,7 @@ def auto_tune_defaults(hardware: Optional[Dict[str, Any]] = None) -> Dict[str, A
             },
         }
     if tier == "tight":
-        # Aggressive VRAM diet — q8 KV cache, capped context, keep model loaded.
+        # Aggressive VRAM diet - q8 KV cache, capped context, keep model loaded.
         return {
             "num_ctx": 2048,
             "ollama_env": {
@@ -626,12 +626,12 @@ def resolve_ollama_tuning(config: Dict[str, Any]) -> Dict[str, Any]:
 
     Rules:
     - Missing keys (or ``"auto"``) get filled from ``auto_tune_defaults()``.
-    - Explicit user values win — auto-tune never overrides them.
+    - Explicit user values win - auto-tune never overrides them.
     - When ``system.auto_tune`` is ``false``, no detection runs; only
       config-provided values are used.
 
     Returns ``{"num_ctx": int, "ollama_env": {...}, "hardware": {...},
-    "auto_tune": bool, "tier": str}`` — the last three are for logging.
+    "auto_tune": bool, "tier": str}`` - the last three are for logging.
     """
     system_cfg = config.get("system") or {}
     llm_cfg = config.get("llm") or {}

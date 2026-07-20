@@ -33,9 +33,9 @@ async def example_basic_chat():
         ]
         
         for query in queries:
-            print(f"\n🤔 User: {query}")
+            print(f"\n User: {query}")
             response = await rag.chat(query)
-            print(f"🤖 Bot: {response}")
+            print(f" Bot: {response}")
 
 async def example_role_based_access():
     """Example: Role-based access control."""
@@ -50,7 +50,7 @@ async def example_role_based_access():
         print(f"\n--- Testing with role: {role} ---")
         async with MCPIntegratedRAG(role=role) as rag:
             response = await rag.chat(query)
-            print(f"🤖 {role} Response: {response[:200]}...")
+            print(f" {role} Response: {response[:200]}...")
 
 async def example_document_management():
     """Example: Document loading and management."""
@@ -68,12 +68,12 @@ async def example_document_management():
         
         for path in test_paths:
             if os.path.exists(path):
-                print(f"\n📄 Loading document: {path}")
+                print(f"\n Loading document: {path}")
                 success = await rag.load_documents(path)
-                print(f"✅ Success: {success}")
+                print(f" Success: {success}")
                 break
         else:
-            print("📄 No test documents found to load")
+            print(" No test documents found to load")
 
 async def example_query_analysis():
     """Example: Query analysis and understanding."""
@@ -90,9 +90,9 @@ async def example_query_analysis():
         ]
         
         for query in queries:
-            print(f"\n🔍 Analyzing: {query}")
+            print(f"\n Analyzing: {query}")
             analysis = await rag.analyze_query(query)
-            print(f"📊 Analysis: {json.dumps(analysis, indent=2)}")
+            print(f" Analysis: {json.dumps(analysis, indent=2)}")
 
 async def example_document_search():
     """Example: Document search and retrieval."""
@@ -109,9 +109,9 @@ async def example_document_search():
         ]
         
         for search_query in search_queries:
-            print(f"\n🔎 Searching for: {search_query}")
+            print(f"\n Searching for: {search_query}")
             results = await rag.search_documents(search_query, max_results=3)
-            print(f"📚 Found {len(results)} documents:")
+            print(f" Found {len(results)} documents:")
             
             for i, doc in enumerate(results, 1):
                 print(f"  {i}. {doc.get('source', 'Unknown')} (Score: {doc.get('score', 0):.3f})")
@@ -131,7 +131,7 @@ async def example_system_monitoring():
         
         # Get statistics
         stats = await rag.get_stats()
-        print("📊 System Statistics:")
+        print(" System Statistics:")
         print(json.dumps(stats, indent=2))
 
 async def example_conversation_management():
@@ -149,15 +149,15 @@ async def example_conversation_management():
             "Tell me about AI"
         ]
         
-        print("💬 Having a conversation...")
+        print(" Having a conversation...")
         for message in conversation:
-            print(f"👤 User: {message}")
+            print(f" User: {message}")
             response = await rag.chat(message)
-            print(f"🤖 Bot: {response[:100]}...")
+            print(f" Bot: {response[:100]}...")
         
-        print("\n🧹 Clearing conversation history...")
+        print("\n Clearing conversation history...")
         await rag.clear_conversation()
-        print("✅ Conversation cleared!")
+        print(" Conversation cleared!")
 
 async def example_mcp_client_direct():
     """Example: Direct MCP client usage."""
@@ -175,21 +175,21 @@ async def example_mcp_client_direct():
     
     try:
         await client.start_server()
-        print("🚀 MCP Server started successfully")
+        print(" MCP Server started successfully")
         
         # Test basic chat
         response = await client.chat("Hello from direct MCP client!")
-        print(f"💬 Direct MCP Response: {response}")
+        print(f" Direct MCP Response: {response}")
         
         # Test getting configuration
         config = await client.get_config()
-        print(f"⚙️  MCP Config Keys: {list(config.keys())}")
+        print(f"️  MCP Config Keys: {list(config.keys())}")
         
     except Exception as e:
-        print(f"❌ Error with direct MCP client: {e}")
+        print(f" Error with direct MCP client: {e}")
     finally:
         await client.stop_server()
-        print("🛑 MCP Server stopped")
+        print(" MCP Server stopped")
 
 async def example_error_handling():
     """Example: Error handling and recovery."""
@@ -207,16 +207,16 @@ async def example_error_handling():
         ]
         
         for test_input, description in error_tests:
-            print(f"\n🧪 Testing: {description}")
+            print(f"\n Testing: {description}")
             try:
                 response = await rag.chat(test_input)
-                print(f"✅ Handled gracefully: {response[:100]}...")
+                print(f" Handled gracefully: {response[:100]}...")
             except Exception as e:
-                print(f"❌ Error: {e}")
+                print(f" Error: {e}")
 
 async def run_all_examples():
     """Run all MCP examples."""
-    print("🚀 Starting Final RAG Chatbot MCP Examples")
+    print(" Starting Final RAG Chatbot MCP Examples")
     print("=" * 60)
     
     examples = [
@@ -233,20 +233,20 @@ async def run_all_examples():
     
     for name, example_func in examples:
         try:
-            print(f"\n🎯 Running example: {name}")
+            print(f"\n Running example: {name}")
             await example_func()
-            print(f"✅ Completed: {name}")
+            print(f" Completed: {name}")
         except Exception as e:
-            print(f"❌ Error in {name}: {e}")
+            print(f" Error in {name}: {e}")
             import traceback
             traceback.print_exc()
     
     print("\n" + "="*60)
-    print("🏁 All MCP examples completed!")
+    print(" All MCP examples completed!")
 
 async def interactive_demo():
     """Interactive demonstration of MCP features."""
-    print("\n🎮 Interactive MCP Demo")
+    print("\n Interactive MCP Demo")
     print("Type a message to chat, or 'help' for commands. Type 'quit' to exit.")
     print("-" * 40)
     
@@ -276,34 +276,34 @@ Available commands:
                 elif command.startswith('chat '):
                     message = command[5:]
                     response = await rag.chat(message)
-                    print(f"🤖 {response}")
+                    print(f" {response}")
                 elif command == 'stats':
                     stats = await rag.get_stats()
-                    print(f"📊 {json.dumps(stats, indent=2)}")
+                    print(f" {json.dumps(stats, indent=2)}")
                 elif command.startswith('analyze '):
                     query = command[8:]
                     analysis = await rag.analyze_query(query)
-                    print(f"🔍 {json.dumps(analysis, indent=2)}")
+                    print(f" {json.dumps(analysis, indent=2)}")
                 elif command.startswith('search '):
                     terms = command[7:]
                     results = await rag.search_documents(terms)
-                    print(f"📚 Found {len(results)} documents")
+                    print(f" Found {len(results)} documents")
                     for i, doc in enumerate(results[:3], 1):
                         print(f"  {i}. {doc.get('source', 'Unknown')}")
                 elif command == 'load' or command.startswith('load '):
                     path = command[5:].strip() if command.startswith('load ') else ""
                     if not path:
-                        print("❌ Usage: load <path>")
+                        print(" Usage: load <path>")
                     else:
                         previous_role = rag.role
                         rag.role = "Admin"
                         success = await rag.load_documents(path)
                         rag.role = previous_role
-                        status = "✅" if success else "❌"
+                        status = "" if success else ""
                         print(f"{status} {rag.last_operation_message}")
                 elif command == 'docs':
                     documents = await rag.get_document_list()
-                    print(f"📚 Loaded documents: {len(documents)}")
+                    print(f" Loaded documents: {len(documents)}")
                     for i, doc in enumerate(documents[:10], 1):
                         chunks = doc.get('chunks', 0)
                         chunk_label = "chunk" if chunks == 1 else "chunks"
@@ -315,29 +315,29 @@ Available commands:
                         print(f"  ... and {len(documents) - 10} more documents")
                 elif command == 'clear':
                     await rag.clear_conversation()
-                    print("✅ Conversation cleared")
+                    print(" Conversation cleared")
                 elif command == 'reset':
                     message = await rag.clear_documents(delete_cache=True)
-                    print(f"✅ Cleared documents/cache: {message}")
+                    print(f" Cleared documents/cache: {message}")
                 elif command == 'role' or command.startswith('role '):
                     role = command[5:].strip().title() if command.startswith('role ') else ""
                     valid_roles = {"Guest", "User", "Expert", "Admin"}
                     if role in valid_roles:
                         rag.role = role
-                        print(f"✅ Role changed to {role}")
+                        print(f" Role changed to {role}")
                     else:
-                        print("❌ Usage: role <Guest|User|Expert|Admin>")
+                        print(" Usage: role <Guest|User|Expert|Admin>")
                 elif command:
                     response = await rag.chat(command)
-                    print(f"🤖 {response}")
+                    print(f" {response}")
                 else:
-                    print("❓ Type a message, or 'help' for available commands.")
+                    print(" Type a message, or 'help' for available commands.")
                     
             except KeyboardInterrupt:
-                print("\n👋 Goodbye!")
+                print("\n Goodbye!")
                 break
             except Exception as e:
-                print(f"❌ Error: {e}")
+                print(f" Error: {e}")
 
 def main():
     """Main function."""

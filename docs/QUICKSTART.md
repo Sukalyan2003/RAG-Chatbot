@@ -112,11 +112,11 @@ python src/examples/mcp_examples.py --interactive   # MCP demo loop
 
 ## 10. Troubleshooting
 
-- **`Ollama service check failed`** — start `ollama serve`, confirm the URL in `config/config.json`, and pull the configured models.
-- **`requests package required`** — the active venv is missing core deps; rerun `pip install -r requirements.txt`.
-- **`Sentence transformers not available`** — only required if you switched `embedding.provider` to `sentence_transformers`; `pip install sentence-transformers` or switch back to `ollama`.
-- **Stale embeddings** — delete `data/embeddings/embeddings_cache.pkl` or call `chatbot.clear_documents(delete_cache=True)`. A model-mismatch cache is auto-rejected on load with a `WARNING` log, but you still need to re-ingest the documents.
-- **Logs** — daily files under `data/logs/rag_system_YYYYMMDD.log`. Bump `system.log_level` to `DEBUG` for verbose tracing.
+- **`Ollama service check failed`** - start `ollama serve`, confirm the URL in `config/config.json`, and pull the configured models.
+- **`requests package required`** - the active venv is missing core deps; rerun `pip install -r requirements.txt`.
+- **`Sentence transformers not available`** - only required if you switched `embedding.provider` to `sentence_transformers`; `pip install sentence-transformers` or switch back to `ollama`.
+- **Stale embeddings** - delete `data/embeddings/embeddings_cache.pkl` or call `chatbot.clear_documents(delete_cache=True)`. A model-mismatch cache is auto-rejected on load with a `WARNING` log, but you still need to re-ingest the documents.
+- **Logs** - daily files under `data/logs/rag_system_YYYYMMDD.log`. Bump `system.log_level` to `DEBUG` for verbose tracing.
 
 ## 10b. Tuning for small GPUs (≤ 4 GB VRAM)
 
@@ -131,7 +131,7 @@ in `config/config.json` (`llm.num_ctx: "auto"`, `system.ollama_env.*: "auto"`,
 | mid     | ≤ 9 GB    | 4096 | f16   | 999 | 24h |
 | ample   | > 9 GB    | 8192 | f16   | 999 | 24h |
 
-To pin a specific value, replace `"auto"` with the value you want — explicit
+To pin a specific value, replace `"auto"` with the value you want - explicit
 config always wins over auto-detection. To disable detection entirely, set
 `system.auto_tune: false`.
 
@@ -145,7 +145,7 @@ export OLLAMA_NUM_GPU=999 OLLAMA_KV_CACHE_TYPE=q8_0 OLLAMA_KEEP_ALIVE=24h
 ollama serve
 ```
 
-`keep_alive` is the most impactful for interactive use — cold-loading a 4B
+`keep_alive` is the most impactful for interactive use - cold-loading a 4B
 model on a 4 GB card takes seconds; keeping it resident for 24 hours
 amortizes that across the session.
 

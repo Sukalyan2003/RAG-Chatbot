@@ -12,7 +12,7 @@ from pathlib import Path
 
 def setup_directories(config):
     """Create necessary directories."""
-    print("📁 Setting up directories...")
+    print(" Setting up directories...")
     
     directories = [
         config["paths"]["data_dir"],
@@ -24,11 +24,11 @@ def setup_directories(config):
     
     for directory in directories:
         Path(directory).mkdir(parents=True, exist_ok=True)
-        print(f"   ✓ Created: {directory}")
+        print(f"    Created: {directory}")
 
 def check_dependencies():
     """Check if required dependencies are installed."""
-    print("🔍 Checking dependencies...")
+    print(" Checking dependencies...")
     
     required_packages = [
         "sklearn", 
@@ -45,22 +45,22 @@ def check_dependencies():
     for package in required_packages:
         try:
             __import__(package.replace("-", "_").replace(".", "_"))
-            print(f"   ✓ {package}")
+            print(f"    {package}")
         except ImportError:
             missing_packages.append(package)
-            print(f"   ❌ {package} - MISSING")
+            print(f"    {package} - MISSING")
     
     if missing_packages:
-        print(f"\n⚠️  Missing packages: {', '.join(missing_packages)}")
+        print(f"\n️  Missing packages: {', '.join(missing_packages)}")
         print("Install them with: pip install -r requirements.txt")
         return False
     
-    print("   ✅ All dependencies installed!")
+    print("    All dependencies installed!")
     return True
 
 def initialize_embedding_model(config):
     """Initialize and cache the embedding model."""
-    print("🤖 Initializing embedding model...")
+    print(" Initializing embedding model...")
     
     try:
         provider = config["embedding"].get("provider", "sentence_transformers")
@@ -79,26 +79,26 @@ def initialize_embedding_model(config):
             embeddings = response.json().get("embeddings", [])
             if not embeddings:
                 raise RuntimeError("Ollama returned no embeddings")
-            print(f"   ✓ Connected to Ollama embedding model: {model_name}")
-            print(f"   ✓ Embedding dimension: {len(embeddings[0])}")
+            print(f"    Connected to Ollama embedding model: {model_name}")
+            print(f"    Embedding dimension: {len(embeddings[0])}")
         else:
             from sentence_transformers import SentenceTransformer
 
             print(f"   Loading model: {model_name}")
             model = SentenceTransformer(model_name)
             embeddings = model.encode(["This is a test sentence."])
-            print(f"   ✓ Model loaded successfully")
-            print(f"   ✓ Embedding dimension: {embeddings.shape[1]}")
+            print(f"    Model loaded successfully")
+            print(f"    Embedding dimension: {embeddings.shape[1]}")
 
         return True
         
     except Exception as e:
-        print(f"   ❌ Error loading model: {e}")
+        print(f"    Error loading model: {e}")
         return False
 
 def test_llm_connection(config):
     """Test connection to LLM."""
-    print("🔗 Testing LLM connection...")
+    print(" Testing LLM connection...")
     
     try:
         if config["llm"].get("provider") == "ollama":
@@ -129,19 +129,19 @@ def test_llm_connection(config):
                 timeout=10
             )
         
-        print(f"   ✓ Connected to {config['llm']['provider']} LLM")
-        print(f"   ✓ Model: {config['llm']['model']}")
+        print(f"    Connected to {config['llm']['provider']} LLM")
+        print(f"    Model: {config['llm']['model']}")
         
         return True
         
     except Exception as e:
-        print(f"   ❌ LLM connection failed: {e}")
-        print("   💡 Make sure your LLM server is running")
+        print(f"    LLM connection failed: {e}")
+        print("    Make sure your LLM server is running")
         return False
 
 def create_sample_data():
     """Create sample documents for testing."""
-    print("📄 Creating sample data...")
+    print(" Creating sample data...")
     
     sample_docs = {
         "sample_doc_1.txt": """
@@ -195,43 +195,43 @@ NLP combines computational linguistics with statistical, machine learning, and d
         file_path = docs_dir / filename
         with open(file_path, 'w', encoding='utf-8') as f:
             f.write(content.strip())
-        print(f"   ✓ Created: {filename}")
+        print(f"    Created: {filename}")
 
 def main():
     """Main setup function."""
-    print("🚀 Final RAG Chatbot Setup")
+    print("Final RAG Chatbot Setup")
     print("=" * 40)
     
     try:
         # Load configuration
-        print("📋 Loading configuration...")
+        print("Loading configuration...")
         with open("config/config.json", 'r') as f:
             config = json.load(f)
-        print("   ✓ Configuration loaded")
+        print("    Configuration loaded")
         
         # Setup directories
         setup_directories(config)
         
         # Check dependencies
         if not check_dependencies():
-            print("\n❌ Setup failed due to missing dependencies")
+            print("\n Setup failed due to missing dependencies")
             return False
         
         # Initialize embedding model
         if not initialize_embedding_model(config):
-            print("\n⚠️  Embedding model initialization failed")
+            print("\n️  Embedding model initialization failed")
             print("The system will still work but performance may be affected")
         
         # Test LLM connection (optional)
         if not test_llm_connection(config):
-            print("\n⚠️  LLM connection failed")
+            print("\n️  LLM connection failed")
             print("You can still use the system with document processing features")
         
         # Create sample data
         create_sample_data()
         
-        print("\n✅ Setup completed successfully!")
-        print("\n🎯 Next steps:")
+        print("\n Setup completed successfully!")
+        print("\n Next steps:")
         print("1. Start your LLM server (if using local)")
         print("2. Run: python -m src.core.final_rag_system --interactive")
         print("3. Or use: python -m src.core.final_rag_system --documents data/documents --interactive")
@@ -239,10 +239,10 @@ def main():
         return True
         
     except FileNotFoundError:
-        print("❌ config/config.json not found. Please ensure the configuration file exists.")
+        print(" config/config.json not found. Please ensure the configuration file exists.")
         return False
     except Exception as e:
-        print(f"❌ Setup failed: {e}")
+        print(f" Setup failed: {e}")
         return False
 
 if __name__ == "__main__":

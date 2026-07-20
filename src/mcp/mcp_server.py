@@ -578,7 +578,7 @@ class MCPStdioServer:
 
                 request = json.loads(line.strip())
 
-                # Handle the request — notify hook fans out progress events.
+                # Handle the request - notify hook fans out progress events.
                 response = await self.handler.handle_request(request, notify=self._notify)
 
                 # Send response to stdout
